@@ -1,0 +1,36 @@
+The programs included with the Debian GNU/Linux system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Debian GNU/Linux comes with ABSOLUTELY NO WARRANTY, to the extent
+permitted by applicable law.
+o,,,,,'''',,''''''''''''''''''''''''''''''''''''lW
+:                 .....'...........             ,W
+:              .;::dxxOx.........'''''''..      ,W
+:             :c.:xx0OOk. ..............,olc;.  ,W
+:           .o'.x:...'xx:;.............'cl,,;;;';W
+;           l;.Oc     ,x:c:'...''''''''',,,;:;;:cW
+;        .',; .K;     .o.                       ,N
+:      .:,.....lx;..   :o                       'N
+:    .:;.       .;::;;:cd                       'N
+:  .c:.                c;        .....',,.      'N
+; 'o.                .l:        .x0oll;:dc      'X
+;'d.              .::,.         .k0cl:::kl      'X
+lx,              'o'             :ocooldXl      'K
+xxk:            ,d.       ..     ,;:ccclKl      'X
+c.d:  ;0oc:::o;dx:'..     ;;    .l,,,';'do      'N
+l;o;,,llol;'';ll::lll;;,,,::..  .c;ccclco;      'X
+Kxd:;dd0ldod,ldolxkOxcxocxc:d::,,ol,ococc':cdloxxN
+
+########################################
+####  TUCAN 3G PROJECT TESTBED NODE ####
+########################################
+
+Useful Commands:
+     remountrw - mount disk as read-write
+     remountro - mount disk as read-only
+     remove.docs - remove all docs and manpages 
+
+GNU/Linux distro:
+     { V o y a g e } - L i n u x     
+      < http://linux.voyage.hk >   Version: 0.10.0
