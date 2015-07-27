@@ -2,16 +2,20 @@
 OWAMP/ -----> Meassurement tool related developed software (optimized for v3.4
          |
          +--> NTP-sync/ -----> Everything related to required NTP synchronization for OWAMP to work
-                          |
-                          +--> TUCAN_ntp.sh --> Boot script to open NTP port using iptables
-                          |
-                          +--> tacsa/ -----> Specific configurations/files for tacsa node
-                          |             |
-                          |             +--> ntp.conf --> NTP daemon configuration
-                          |
-                          +--> nurco/ -----> Specific configurations/files for nurco node
-                                        |
-                                        +--> ntp.conf --> NTP daemon configuration
+         |                |
+         |                +--> TUCAN_ntp.sh --> Boot script to open NTP port using iptables
+         |                |
+         |                +--> tacsa/ -----> Specific configurations/files for tacsa node
+         |                |             |
+         |                |             +--> ntp.conf --> NTP daemon configuration
+         |                |
+         |                +--> nurco/ -----> Specific configurations/files for nurco node
+         |                              |
+         |                              +--> ntp.conf --> NTP daemon configuration
+         |
+         +--> OWAMP-conf/ -----> Configuration files for OWAMP daemon
+                            |
+                            +--> TUCAN_owamp.sh --> Boot script to launch owamp server
 
 motd --> Message Of The Day file, to customize ssh access to the node and present it to the user
 
