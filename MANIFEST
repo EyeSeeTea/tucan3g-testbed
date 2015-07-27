@@ -16,6 +16,10 @@ OWAMP/ -----> Meassurement tool related developed software (optimized for v3.4
          +--> OWAMP-conf/ -----> Configuration files for OWAMP daemon
                             |
                             +--> TUCAN_owamp.sh --> Boot script to launch owamp server
+                            |
+                            +--> owamp --> Script to be placed at /etc/default, to set default options for owamp daemon
+                            |
+                            +--> owampd.conf --> Conf file to be placed at /etc/owampd, to set configuration option
 
 motd --> Message Of The Day file, to customize ssh access to the node and present it to the user
 

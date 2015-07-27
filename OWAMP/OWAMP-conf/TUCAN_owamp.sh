@@ -38,11 +38,14 @@
 now=$(date +"%F %k:%M:%S")
 log_tag="[TUCAN3G]"
 log_level="-p local0.notice"
+if [ -r /etc/default/owamp ]; then
+  . /etc/default/owamp
+fi
 
 case "$1" in
 start)
   logger $log_level -t $log_tag -s "Starting owampd ..."
-  owampd -f -c /etc/owampd -AO -v /var/
+  owampd $OWAMPD_OPTS
   logger $log_level -t $log_tag -s "Done\n"
   ;;
 stop)
