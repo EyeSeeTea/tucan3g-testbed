@@ -46,11 +46,13 @@ case "$1" in
 start)
   logger $log_level -t $log_tag -s "Starting owampd ..."
   owampd $OWAMPD_OPTS
+  iptables -A INPUT -p tcp --dport 861 -j ACCEPT
   logger $log_level -t $log_tag -s "Done\n"
   ;;
 stop)
   logger $log_level -t $log_tag -s "Stopping owampd ..."
   kill -9 $(cat owampd.pid)
+  iptables -D INPUT -p tcp --dport 861 -j ACCEPT
   logger $log_level -t $log_tag -s "Done\n"
   ;;
 *)
