@@ -50,7 +50,7 @@ start)
   ;;
 stop)
   logger $log_level -t $log_tag -s "Stopping bwctld ..."
-  kill -9 $(cat bwctld.pid)
+  kill -9 $(cat /var/tmp/bwctld.pid)
   logger $log_level -t $log_tag -s "Done\n"
   ;;
 *)

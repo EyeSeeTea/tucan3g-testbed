@@ -1,1 +1,1 @@
-OWAMPD_OPTS='-c /etc/owampd -aO -f -v /var'
+OWAMPD_OPTS='-c /etc/owampd -aO -f -v /var/tmp'

@@ -1,1 +1,1 @@
-BWCTLD_OPTS='-c /etc/bwctld -aO -f -R /var'
+BWCTLD_OPTS='-c /etc/bwctld -aO -f -R /var/tmp'

@@ -51,7 +51,7 @@ start)
   ;;
 stop)
   logger $log_level -t $log_tag -s "Stopping owampd ..."
-  kill -9 $(cat owampd.pid)
+  kill -9 $(cat /var/tmp/owampd.pid)
   iptables -D INPUT -p tcp --dport 861 -j ACCEPT
   logger $log_level -t $log_tag -s "Done\n"
   ;;
