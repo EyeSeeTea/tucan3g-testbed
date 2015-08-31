@@ -23,8 +23,8 @@ set -x
 echo "DS: $1"
 echo "Sender: $2"
 echo "Receiver: $3"
-until $(bwctl -T iperf3 -f m -D $1 --sender $2 --receiver $3 --streaming -p -d /var/tmp --format c --parsable -d /var/tmp); do
+until $(bwctl -T iperf3 -f m -D $1 --sender $2 --receiver $3 --streaming -p -d /var/tmp --format c --parsable); do
     now=$(date +"%F %k:%M:%S")
-    logger "-p local0.notice" -t [TUCAN3G] -s "[$now] - [FATAL] - bwctl crashed with exit code $?. Respawning..."
+    logger -p local0.notice -t [TUCAN3G] -s "[$now] - [FATAL] - bwctl crashed with exit code $?. Respawning..."
   sleep 100
 done
