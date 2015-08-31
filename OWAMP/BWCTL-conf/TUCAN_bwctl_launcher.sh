@@ -27,8 +27,9 @@ set -x
 # $4: Receiver IP
 # $5: Total amount of tests
 
-until $(bwctl -T iperf3 -f m -D $2 --sender $3 --receiver $4 --format c --parsable -P 2 > /var/tmp/${1}.results); do
-    now=$(date +"%F %k:%M:%S")
-    logger -p local0.notice -t [TUCAN3G] -s "[$now] - bwctl measurement finished with exit code $?. Respawning..."
-  sleep 30
+while $(bwctl -T iperf3 -f m -D $2 --sender $3 --receiver $4 --format c --parsable -P 1 > /var/tmp/${1}.tmp); do
+  now=$(date +"%F %k:%M:%S")
+  logger -p local0.notice -t [TUCAN3G] -s "[$now] - bwctl measurement finished with exit code $?. Respawning..."
+  mv /var/tmp/${1}.tmp /var/tmp/${1}.json
+  sleep 1
 done

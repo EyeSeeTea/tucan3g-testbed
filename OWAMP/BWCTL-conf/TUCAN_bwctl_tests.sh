@@ -98,16 +98,16 @@ start)
       launch_test "$key" "${DSS[$i]}" "${IPS_SRC[$i]}" "${IPS_DST[$i]}" "${#KEYS[@]}" 
       i=$(echo "$i + 1"|bc)
     done 
-    log notice "Done\n"
+    log notice "Done"
   else
     get_time
     log err "[$now] - [FATAL] - No ips.conf file detected, no measurements launched"
   fi
   ;;
 stop)
-  log notice "Stopping bwctld ..."
-  kill -9 $(cat /var/tmp/bwctld.pid)
-  log notice "Done\n"
+  log notice "Stopping working bwctl tests..."
+  tmux ls | grep : | cut -d. -f1 | awk '{print substr($1, 0, length($1))}' | grep ^TUCAN | xargs -I ARG tmux kill-session -t ARG
+  log notice "Done"
   ;;
 *)
   get_time
