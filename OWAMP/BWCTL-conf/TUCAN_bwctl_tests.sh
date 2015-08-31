@@ -63,15 +63,15 @@ log(){
 }
 
 # Launch a bwctl test using screen
-# $1: DSCP
-# $2: Sender IP
-# $3: Receiver IP
+# $1: Unique keyword
+# $2: DSCP
+# $3: Sender IP
+# $4: Receiver IP
+# $5: Total amount of tests
 launch_test(){
-  log notice "key: $1"
-  log notice "DS: $2"
-  log notice "Sender: $3"
-  log notice "Receiver: $4"
-  tmux new -d -s "TUCAN-$1" "bash /etc/bwctld/TUCAN_bwctl_launcher.sh $2 $3 $4" \; detach \; 
+  log notice "Launching test..."
+  log notice "key: $1 -- DS: $2 -- Sender: $3 -- Receiver: $4"
+  tmux new -d -s "TUCAN-$1" "bash /etc/bwctld/TUCAN_bwctl_launcher.sh $1 $2 $3 $4 $5" \; detach \; 
 }
 
 
@@ -95,7 +95,7 @@ start)
     # Launch tests
     i=0
     for key in ${KEYS[@]}; do
-      launch_test "$key" "${DSS[$i]}" "${IPS_SRC[$i]}" "${IPS_DST[$i]}" 
+      launch_test "$key" "${DSS[$i]}" "${IPS_SRC[$i]}" "${IPS_DST[$i]}" "${#KEYS[@]}" 
       i=$(echo "$i + 1"|bc)
     done 
     log notice "Done\n"
