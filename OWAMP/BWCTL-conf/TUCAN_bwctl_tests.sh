@@ -48,13 +48,39 @@ IPS_SRC=
 IPS_DST=
 DSS=
 
+# Store the time present in now variable
+get_time(){
+  now=$(date +"%F %k:%M:%S")
+}
+
+# Log messages giving a log level
+# $1: log_level [ emerg | alert | crit | err | warning | notice | info ]
+# $2: message
+log(){
+  log_level="local0.${1}"
+  message="$2"
+  logger -p "$log_level" -t "$log_tag" -s "$message"
+}
+
+# Launch a bwctl test using screen
+# $1: DSCP
+# $2: Sender IP
+# $3: Receiver IP
+launch_test(){
+  log notice "key: $1"
+  log notice "DS: $2"
+  log notice "Sender: $3"
+  log notice "Receiver: $4"
+  tmux new -d -s "TUCAN-$1" "bash /etc/bwctld/TUCAN_bwctl_launcher.sh $2 $3 $4" \; detach \; 
+}
+
 
 case "$1" in
 start)
-  logger $log_level -t $log_tag -s "Starting bwctld tests configured in ips.conf..."
+  log notice "Starting bwctld tests configured in ips.conf..."
   # script is only executed when ips.conf file is present
   if [ -r /etc/bwctld/ips.conf ]; then
-    # Data parsing
+    # Data parsing from ips.conf file
     KEYS=( $( awk 'NR >= 1  {print $1}' /etc/bwctld/ips.conf ) )
     IPS_SRC=( $( awk 'NR >= 1  {print $2}' /etc/bwctld/ips.conf ) )
     IPS_DST=( $( awk 'NR >= 1  {print $3}' /etc/bwctld/ips.conf) )
@@ -62,33 +88,30 @@ start)
 
     # Validations
     if [ ${#KEYS[@]} -gt ${#IPS_SRC[@]} ] || [ ${#KEYS[@]} -gt ${#IPS_DST[@]} ] || [ ${#KEYS[@]} -gt ${#DSS[@]} ]; then
-      echo "Error, bad ips.conf format" >&2
+      log err "Error, bad ips.conf format"
       exit $RETURN_BAD_FORMAT
     fi
 
+    # Launch tests
     i=0
     for key in ${KEYS[@]}; do
-      bwctl -T iperf3 -f m -D ${DSS[$i]} --sender ${IPS_SRC[$i]} --receiver ${IPS_DST[$i]} --streaming -p -d /var/tmp --format c --parsable -d /var/tmp
-      RETURN=$?
-      if [ $RETURN -ne 0 ]; then
-        echo "Error, bad bwctl command" >&2
-        exit $RETURN_BAD_COMMAND
-      fi 
+      launch_test "$key" "${DSS[$i]}" "${IPS_SRC[$i]}" "${IPS_DST[$i]}" 
       i=$(echo "$i + 1"|bc)
     done 
-    logger $log_level -t $log_tag -s "Done\n"
-    #$(awk 'NR >= 1 {if($1=="tacsa-nurco") print $2}' /etc/bwctld/ips.conf)
+    log notice "Done\n"
   else
-    logger $log_level -t $log_tag -s "[$now] - [FATAL] - No ips.conf file detected, no measurements launched"
+    get_time
+    log err "[$now] - [FATAL] - No ips.conf file detected, no measurements launched"
   fi
   ;;
 stop)
-  logger $log_level -t $log_tag -s "Stopping bwctld ..."
+  log notice "Stopping bwctld ..."
   kill -9 $(cat /var/tmp/bwctld.pid)
-  logger $log_level -t $log_tag -s "Done\n"
+  log notice "Done\n"
   ;;
 *)
-  logger $log_level -t $log_tag -s "[$now] - [FATAL] - Unknow command, only available are start|stop"
+  get_time
+  log err "[$now] - [FATAL] - Unknow command, only available are start|stop"
   ;;
 esac
 
