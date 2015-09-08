@@ -13,7 +13,7 @@
 #
 # Copyright (c) 2015.
 #
-# This file is part of WP5 TUCAN3G Testbed 
+# This file is part of WP5 TUCAN3G Testbed
 #
 #  WP5 TUCAN3G Testbed software is free software: you can redistribute it and/or modify
 #  it under the terms of the GNU General Public License as published by
@@ -31,9 +31,9 @@
 #  Script developed by EyeSeeTea Ltd
 #
 
-#############################
-# NTP NAT acceptance script #
-#############################
+#########################################
+# NTP launching & NAT acceptance script #
+#########################################
 
 now=$(date +"%F %k:%M:%S")
 log_tag="[TUCAN3G]"
@@ -41,13 +41,19 @@ log_level="-p local0.notice"
 
 case "$1" in
 start)
-  logger $log_level -t $log_tag -s "Defining ntp iptables rules ..."
+  logger $log_level -t $log_tag -s "Defining ntp iptables rules and launching ntp daemon..."
   iptables -A INPUT -j ACCEPT -p tcp --dport 123
+  # To keep it started, we use until to respawn each time it dies
+  until $(/usr/sbin/ntpd -p /var/run/ntpd.pid -g -u 106:110); do
+    logger $log_level -t $log_tag -s "[$now] - [FATAL] - ntp crashed with exit code $?. Respawning..."
+    sleep 1
+  done
   logger $log_level -t $log_tag -s "Done\n"
   ;;
 stop)
-  logger $log_level -t $log_tag -s "Removing ntp iptables rules ..."
+  logger $log_level -t $log_tag -s "Removing ntp iptables rules and stopping ntp daemon..."
   iptables -D INPUT -j ACCEPT -p tcp --dport 123
+  kill -9 $(cat /var/run/ntpd.pid)
   logger $log_level -t $log_tag -s "Done\n"
   ;;
 *)

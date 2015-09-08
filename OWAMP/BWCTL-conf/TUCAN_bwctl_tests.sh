@@ -39,6 +39,7 @@ set -x
 now=$(date +"%F %k:%M:%S")
 log_tag="[TUCAN3G]"
 log_level="-p local0.notice"
+TUCAN_FOLDER=/etc/TUCAN3G
 RETURN_BAD_COMMAND=2
 RETURN_BAD_FORMAT=1
 RETURN_SUCCESS=0
@@ -71,7 +72,7 @@ log(){
 launch_test(){
   log notice "Launching test..."
   log notice "key: $1 -- DS: $2 -- Sender: $3 -- Receiver: $4"
-  tmux new -d -s "TUCAN-$1" "bash /etc/bwctld/TUCAN_bwctl_launcher.sh $1 $2 $3 $4 $5" \; detach \; 
+  tmux new -d -s "TUCAN-$1" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh $1 $2 $3 $4 $5" \; detach \; 
 }
 
 
@@ -79,12 +80,12 @@ case "$1" in
 start)
   log notice "Starting bwctld tests configured in ips.conf..."
   # script is only executed when ips.conf file is present
-  if [ -r /etc/bwctld/ips.conf ]; then
+  if [ -r ${TUCAN_FOLDER}/ips.conf ]; then
     # Data parsing from ips.conf file
-    KEYS=( $( awk 'NR >= 1  {print $1}' /etc/bwctld/ips.conf ) )
-    IPS_SRC=( $( awk 'NR >= 1  {print $2}' /etc/bwctld/ips.conf ) )
-    IPS_DST=( $( awk 'NR >= 1  {print $3}' /etc/bwctld/ips.conf) )
-    DSS=( $( awk 'NR >= 1  {print $4}' /etc/bwctld/ips.conf ) )
+    KEYS=( $( awk 'NR >= 1  {print $1}' ${TUCAN_FOLDER}/ips.conf ) )
+    IPS_SRC=( $( awk 'NR >= 1  {print $2}' ${TUCAN_FOLDER}/ips.conf ) )
+    IPS_DST=( $( awk 'NR >= 1  {print $3}' ${TUCAN_FOLDER}/ips.conf) )
+    DSS=( $( awk 'NR >= 1  {print $4}' ${TUCAN_FOLDER}/ips.conf ) )
 
     # Validations
     if [ ${#KEYS[@]} -gt ${#IPS_SRC[@]} ] || [ ${#KEYS[@]} -gt ${#IPS_DST[@]} ] || [ ${#KEYS[@]} -gt ${#DSS[@]} ]; then
