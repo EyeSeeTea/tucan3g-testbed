@@ -7,6 +7,7 @@ import logging
 import time
 from os.path import join, isfile
 import json
+import ConfigParser
 
 #third party libs
 from daemon import runner
@@ -21,13 +22,21 @@ class TUCANDaemon():
         self.pidfile_timeout = 5
            
     def run(self):
-        TUCANConfFolder = '/etc/TUCAN3G'
-        TUCANVarFolder = '/var/log/TUCAN3G'
-        TUCANTmpFolder = '/var/tmp'
+        # Extract some useful paths from config file
+        try:
+            TUCANConfFolder = config.get('tucan', 'EtcFolder')
+            TUCANVarFolder = config.get('tucan', 'LogFolder')
+            TUCANTmpFolder = config.get('tucan', 'TmpFolder')
+            TUCANIpsFile = config.get('tests', 'confFile')
+        except:
+            logger.setLevel(logging.ERROR)
+            logger.error('Config file tucand.conf malformed. Mandatory fields missing!')
+            raise
+
         # To avoid strange behaviors if we modify file while the daemon is in execution, we first look at the file content and then 
         # we operate all the time using our memory cached file content.
         tests = dict()
-        with open(join(TUCANConfFolder, 'ips.conf')) as ipsConfFile:
+        with open(TUCANIpsFile) as ipsConfFile:
         # Save the content of the file in a dictionary where the key is the first entry of the file, and the rest of the line is stored as a list
         for line in ipsConfFile:
             # turn a list like ['a', 'b', 'c', 'd'] into a dict like {'a': ['b', 'c', 'd']}
@@ -46,10 +55,17 @@ class TUCANDaemon():
                     senderBw = data['end']['streams'][0]['sender']['bits_per_second']
                     receiverBw = data['end']['streams'][0]['receiver']['bits_per_second']
                     logger.info("key: %s -- IP_ORIG: %s -- IP_DST: %s -- DS: %s -- SENDER BW: %s, RECEIVER BW: %s" % (key, tests[key][0], tests[key][1], tests[key][2], senderBw, receiverBw))
+                    # If it is an edge node we have to configure queues according to measured bw
+                    if config.getboolean('tucan', 'edge'):
+                        logger.info('this is an edge node')
  
             #Note that logger level needs to be set to logging.DEBUG before this shows up in the logs
             logger.info("Info message")
             time.sleep(10)
+
+# Parse config file
+config = ConfigParser.ConfigParser()
+config.read('/etc/TUCAN3G/tucand.conf')
 
 daemon = TUCANDaemon()
 logger = logging.getLogger("DaemonLog")
