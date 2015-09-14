@@ -54,6 +54,7 @@ class TUCANDaemon():
                 tests.update(dict(itertools.izip_longest(*[iter([key, values])] * 2, fillvalue="")))
         # Initial conditions
         if config.getboolean('general', 'edge'):
+            logger.info('this is an edge node')
             if not config.getboolean('general', 'isOptimal'):
                 logger.info('Suboptimal algorithm selected')
                 rates = []
@@ -78,20 +79,23 @@ class TUCANDaemon():
         while True:
             # If it is an edge node we have to configure queues according to measured bw
             if config.getboolean('general', 'edge'):
-                logger.info('this is an edge node')
                 # parse json results file
                 data = dict()
-                with open(join(self.TUCANTmpFolder, key + '.json')) as jsonFile:
-                    data = json.load(jsonFile)
-                # Suboptimal algorithm
-                if not config.getboolean('general', 'isOptimal'):
-                    senderBw = data['end']['streams'][0]['sender']['bits_per_second']
-                    receiverBw = data['end']['streams'][0]['receiver']['bits_per_second']
-                    logger.info("key: %s -- IP_ORIG: %s -- IP_DST: %s -- DS: %s -- SENDER BW: %s, RECEIVER BW: %s" % (key, tests[key][0], tests[key][1], tests[key][2], senderBw, receiverBw))
+                for key in tests.keys():
+                    for sense in [ 'out', 'in' ]:
+                        with open('%s-%s.json' % (join(self.TUCANTmpFolder, key), sense)) as jsonFile:
+                            data = json.load(jsonFile)
+                        # Suboptimal algorithm
+                        if not config.getboolean('general', 'isOptimal'):
+                            senderBw = data['end']['streams'][0]['sender']['bits_per_second']
+                            receiverBw = data['end']['streams'][0]['receiver']['bits_per_second']
+                            logger.info("key: %s -- in <--> out: %s <--> %s -- DS: %s -- SENDER BW: %s, RECEIVER BW: %s SENSE: %s" % (key, tests[key][0], tests[key][1], tests[key][2], senderBw, receiverBw, sense))
+                            linkDynamicCapacity = receiverBw/1000.0
+                            logger.info("link dynamic capacity = %f" % linkDynamicCapacity)
                     
-
-                else:
-                    logger.info('Optimal algorithm')
+                    
+                        else:
+                            logger.info('Optimal algorithm')
             else:
                 # Normal node must read configuration set by edge nodes in tmp folder
                 logger.info('this is a normal node')
@@ -114,7 +118,7 @@ if __name__ == "__main__":
 
     if len(sys.argv) == 2:    
         if 'stop' == sys.argv[1]:
-        # To do just before deleting the object (so when stop is called)
+            # Remove ingress queues previously configured
             for i, iface in enumerate(json.loads(config.get('general', 'ingressIfaces'))):
                 logger.info("cleaning ingress policing on interface %s" % iface)
                 os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning

@@ -2,7 +2,7 @@
 #set -x
 ### BEGIN INIT INFO
 # Provides:          TUCAN_bwctl_tests
-# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $TUCAN_ntp $TUCAN_owamp $TUCAN_bwctl
+# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $ntp $TUCAN_ntp $TUCAN_owamp $TUCAN_bwctl
 # Required-Stop:
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
@@ -72,7 +72,9 @@ log(){
 launch_test(){
   log notice "Launching test..."
   log notice "key: $1 -- DS: $2 -- Sender: $3 -- Receiver: $4"
-  tmux new -d -s "TUCAN-$1" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh $1 $2 $3 $4 $5" \; detach \; 
+  # We test both senses
+  tmux new -d -s "TUCAN-$1-out" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh ${1}-out $2 $3 $4 $5" \; detach \; 
+  tmux new -d -s "TUCAN-$1-in" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh ${1}-in $2 $4 $3 $5" \; detach \; 
 }
 
 
