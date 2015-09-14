@@ -1,5 +1,5 @@
 #!/bin/bash
-set -x
+#set -x
 #
 # Copyright (c) 2015.
 #
@@ -20,11 +20,22 @@ set -x
 #
 #  Script developed by EyeSeeTea Ltd
 #
-echo "DS: $1"
-echo "Sender: $2"
-echo "Receiver: $3"
-until $(bwctl -T iperf3 -f m -D $1 --sender $2 --receiver $3 --streaming -p -d /var/tmp --format c --parsable); do
-    now=$(date +"%F %k:%M:%S")
-    logger -p local0.notice -t [TUCAN3G] -s "[$now] - [FATAL] - bwctl crashed with exit code $?. Respawning..."
-  sleep 100
+# Script params:
+# $1: Unique keyword
+# $2: DSCP
+# $3: Sender IP
+# $4: Receiver IP
+# $5: Total amount of tests
+
+while $(bwctl -T iperf3 -f m -D $2 --sender $3 --receiver $4 --format c --parsable -P 1 > /var/tmp/${1}.tmp); do
+  now=$(date +"%F %k:%M:%S")
+  logger -p local0.notice -t [TUCAN3G] -s "[$now] - bwctl measurement finished with exit code $?. Respawning..."
+  # bwctl create bad formed jsons as it introduced a tag in the start and ending of the file we have to manually remove
+  lines_number=$(wc -l /var/tmp/${1}.tmp|cut -d ' ' -f 1)
+  lines_number=$(($lines_number - 2))
+  head -n $lines_number /var/tmp/${1}.tmp > /var/tmp/${1}-tmp.tmp
+  lines_number=$(($lines_number - 2))
+  tail -n $lines_number /var/tmp/${1}-tmp.tmp > /var/tmp/${1}.json
+  rm /var/tmp/${1}-tmp.tmp
+  sleep 1
 done

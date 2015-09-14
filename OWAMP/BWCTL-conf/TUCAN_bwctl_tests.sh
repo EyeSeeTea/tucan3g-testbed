@@ -1,5 +1,5 @@
 #!/bin/bash
-set -x
+#set -x
 ### BEGIN INIT INFO
 # Provides:          TUCAN_bwctl_tests
 # Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $TUCAN_ntp $TUCAN_owamp $TUCAN_bwctl
