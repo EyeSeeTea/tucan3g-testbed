@@ -1,8 +1,8 @@
 #!/bin/sh
 ### BEGIN INIT INFO
 # Provides:          TUCAN_owamp
-# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $TUCAN_ntp
-# Required-Stop:
+# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $time TUCAN_ntp
+# Required-Stop:     TUCAN_bwctl TUCAN_bwctl_tests tucand
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # X-Interactive:     false
@@ -45,15 +45,15 @@ fi
 case "$1" in
 start)
   logger $log_level -t $log_tag -s "Starting owampd ..."
-  owampd $OWAMPD_OPTS
+  /usr/local/bin/owampd $OWAMPD_OPTS 2>&1 > /var/log/owampd.log
   iptables -A INPUT -p tcp --dport 861 -j ACCEPT
-  logger $log_level -t $log_tag -s "Done\n"
+  logger $log_level -t $log_tag -s "Done"
   ;;
 stop)
   logger $log_level -t $log_tag -s "Stopping owampd ..."
-  kill -9 $(cat /var/owampd.pid)
+  kill -9 $(cat /var/tmp/owampd.pid)
   iptables -D INPUT -p tcp --dport 861 -j ACCEPT
-  logger $log_level -t $log_tag -s "Done\n"
+  logger $log_level -t $log_tag -s "Done"
   ;;
 *)
   logger $log_level -t $log_tag -s "[$now] - [FATAL] - Unknow command, only available are start|stop"

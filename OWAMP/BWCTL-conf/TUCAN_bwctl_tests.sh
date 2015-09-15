@@ -1,15 +1,15 @@
 #!/bin/bash
-#set -x
 ### BEGIN INIT INFO
 # Provides:          TUCAN_bwctl_tests
-# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $ntp $TUCAN_ntp $TUCAN_owamp $TUCAN_bwctl
-# Required-Stop:
+# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $time TUCAN_ntp TUCAN_owamp TUCAN_bwctl
+# Required-Stop:     tucand
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # X-Interactive:     false
 # Short-Description: TUCAN3G testbed bwctl measurements automatic launch
 # Description: TUCAN3G testbed bwctl measurements automatic launch
 ### END INIT INFO
+#set -x
 
 #
 # Copyright (c) 2015.
@@ -73,8 +73,8 @@ launch_test(){
   log notice "Launching test..."
   log notice "key: $1 -- DS: $2 -- Sender: $3 -- Receiver: $4"
   # We test both senses
-  tmux new -d -s "TUCAN-$1-out" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh ${1}-out $2 $3 $4 $5" \; detach \; 
-  tmux new -d -s "TUCAN-$1-in" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh ${1}-in $2 $4 $3 $5" \; detach \; 
+  /usr/bin/tmux new -d -s "TUCAN-$1-out" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh ${1}-out $2 $3 $4 $5" \; detach \; 
+  /usr/bin/tmux new -d -s "TUCAN-$1-in" "bash ${TUCAN_FOLDER}/TUCAN_bwctl_launcher.sh ${1}-in $2 $4 $3 $5" \; detach \; 
 }
 
 
@@ -109,7 +109,7 @@ start)
   ;;
 stop)
   log notice "Stopping working bwctl tests..."
-  tmux ls | grep : | cut -d. -f1 | awk '{print substr($1, 0, length($1))}' | grep ^TUCAN | xargs -I ARG tmux kill-session -t ARG
+  /usr/bin/tmux ls | grep : | cut -d. -f1 | awk '{print substr($1, 0, length($1))}' | grep ^TUCAN | xargs -I ARG tmux kill-session -t ARG
   log notice "Done"
   ;;
 *)

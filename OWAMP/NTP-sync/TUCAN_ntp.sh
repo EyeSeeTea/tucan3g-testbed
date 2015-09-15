@@ -1,8 +1,8 @@
 #!/bin/sh
 ### BEGIN INIT INFO
 # Provides:          TUCAN_ntp
-# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash
-# Required-Stop:
+# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $time
+# Required-Stop:     TUCAN_owamp TUCAN_bwctl TUCAN_bwctl_tests tucand
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # X-Interactive:     false

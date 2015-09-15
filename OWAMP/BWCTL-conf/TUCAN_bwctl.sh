@@ -1,8 +1,8 @@
 #!/bin/sh
 ### BEGIN INIT INFO
 # Provides:          TUCAN_bwctl
-# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $TUCAN_ntp $TUCAN_owamp
-# Required-Stop:
+# Required-Start:    $local_fs $remote_fs $network $syslog $nocatsplash $time TUCAN_ntp TUCAN_owamp
+# Required-Stop:     TUCAN_bwctl_tests tucand
 # Default-Start:     2 3 4 5
 # Default-Stop:      0 1 6
 # X-Interactive:     false
@@ -45,7 +45,7 @@ fi
 case "$1" in
 start)
   logger $log_level -t $log_tag -s "Starting bwctld ..."
-  bwctld $BWCTLD_OPTS
+  /usr/local/bin/bwctld $BWCTLD_OPTS
   logger $log_level -t $log_tag -s "Done\n"
   ;;
 stop)
