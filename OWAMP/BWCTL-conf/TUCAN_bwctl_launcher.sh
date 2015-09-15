@@ -1,5 +1,5 @@
 #!/bin/bash
-#set -x
+set -x
 #
 # Copyright (c) 2015.
 #
@@ -27,7 +27,7 @@
 # $4: Receiver IP
 # $5: Total amount of tests
 
-while $(/usr/local/bin/bwctl -T iperf3 -f m -D $2 --sender $3 --receiver $4 --format c --parsable -P 1 > /var/tmp/${1}.tmp); do
+while $(/usr/local/bin/bwctl -T iperf3 -f m -D $2 --sender $3 --receiver $4 --format c --parsable -P 1 -a 1000 > /var/tmp/${1}.tmp); do
   now=$(date +"%F %k:%M:%S")
   logger -p local0.notice -t [TUCAN3G] -s "[$now] - bwctl measurement finished with exit code $?. Respawning..."
   # bwctl create bad formed jsons as it introduced a tag in the start and ending of the file we have to manually remove

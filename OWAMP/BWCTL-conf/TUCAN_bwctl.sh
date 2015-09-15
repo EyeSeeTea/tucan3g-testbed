@@ -35,6 +35,8 @@
 # BWCTL automatic launch script #
 #################################
 
+export PATH=$PATH:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
 now=$(date +"%F %k:%M:%S")
 log_tag="[TUCAN3G]"
 log_level="-p local0.notice"
@@ -45,13 +47,13 @@ fi
 case "$1" in
 start)
   logger $log_level -t $log_tag -s "Starting bwctld ..."
-  /usr/local/bin/bwctld $BWCTLD_OPTS
-  logger $log_level -t $log_tag -s "Done\n"
+  bwctld $BWCTLD_OPTS
+  logger $log_level -t $log_tag -s "Done"
   ;;
 stop)
   logger $log_level -t $log_tag -s "Stopping bwctld ..."
   kill -9 $(cat /var/tmp/bwctld.pid)
-  logger $log_level -t $log_tag -s "Done\n"
+  logger $log_level -t $log_tag -s "Done"
   ;;
 *)
   logger $log_level -t $log_tag -s "[$now] - [FATAL] - Unknow command, only available are start|stop"
