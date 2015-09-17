@@ -24,6 +24,10 @@ class TUCANDaemon():
 
     # dictionary that stores, one by link of the network, the measured dynamic capacity
     stableDynamicCapacity = dict()
+    # flux UL margin by node
+    fluxUlMargin = dict()
+    # flux DL margin by node
+    fluxDlMargin = dict()
     # dictionary that stores, one by node, the UL allowed traffic
     ulAdmittedTraffic = dict()
     # dictionary that stores, one by node, the DL allowd traffic
@@ -58,6 +62,8 @@ class TUCANDaemon():
         tests = self.parseTests()
         # Initial conditions
         self.initializeIngress()
+        # nodes from conf file
+        nodes = json.loads(config.get('suboptimal', 'nodes'))
 
         # Main loop 
         while True:
@@ -75,6 +81,7 @@ class TUCANDaemon():
                         continue
                     for netIndex, key in enumerate(tests.keys()):
                         k = json.loads(config.get('suboptimal', 'k'))[netIndex]
+                        beta = config.get('suboptimal', 'beta')
                         capacity = dynamicCapacity[key] * k
                         self.addDynamicCapacity(key, capacity)
                         logger.info("adding %f to %s capacity" % (capacity, key))
@@ -87,23 +94,55 @@ class TUCANDaemon():
                             ulMin = sum(ulMins[netIndex:netIndex+1])
                             dlMins = json.loads(config.get('suboptimal', 'initialDLMin'))
                             dlMin = sum(dlMins[netIndex:netIndex+1])
-                            minMargin = capacity - (ulMin + dlMin)
+                            minMargin = capacity - (sum(ulMins) + sum(dlMins))
                             # Effective margin calculus
                             logger.info('Mean Dynamic Capacity: %f' % self.getMeanDynamicCapacity(key))
-                            effectiveMargin = capacity - self.getMeanDynamicCapacity(key) 
+                            # FIXME: create effectiveMargin taking into account dynamically configured limits and not fixed limits
+                            effectiveMargin = capacity - (sum(ulMins) + sum(dlMins))
                             # Link margin calculus
                             linkMargin = min([minMargin, effectiveMargin])
-                            #Traffic flux margins
-                            fluxULMargin = (ulMin / (sum(ulMins) + sum(dlMins))) * linkMargin
-                            fluxDLMargin = (dlMin / (sum(ulMins) + sum(dlMins))) * linkMargin
-                            logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- UL flux margin: %f -- DL flux margin: %f' % (minMargin, effectiveMargin, linkMargin, fluxULMargin, fluxDLMargin))
+
+                            # Traffic flux margins
+                            # In a network, the most close to the UL edge
+                            self.fluxUlMargin.update({nodes[netIndex]: (ulMins[netIndex] / (sum(ulMins) + sum(dlMins))) * linkMargin})
+                            self.fluxUlMargin.update({nodes[netIndex+1]: (ulMins[netIndex+1] / (sum(ulMins) + sum(dlMins))) * linkMargin})
+                            self.fluxDlMargin.update({nodes[netIndex]: (dlMins[netIndex] / (sum(ulMins) + sum(dlMins))) * linkMargin})
+                            self.fluxDlMargin.update({nodes[netIndex+1]: (dlMins[netIndex+1] / (sum(ulMins) + sum(dlMins))) * linkMargin})
+                            logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- UL flux margin 1: %f -- UL flux margin 2: %f -- DL flux margin 1: %f -- DL flux margin 2: %f' % (minMargin, effectiveMargin, linkMargin, self.fluxUlMargin.get(nodes[netIndex]), self.fluxUlMargin.get(nodes[netIndex+1]), self.fluxDlMargin.get(nodes[netIndex]), self.fluxDlMargin.get(nodes[netIndex+1])))
+                            
+                            # Allowed traffics
+                            # Initialization
+                            if self.ulAdmittedTraffic.get(nodes[netIndex]) == None:
+                                self.ulAdmittedTraffic.update({nodes[netIndex]: 0})
+                            if self.ulAdmittedTraffic.get(nodes[netIndex+1]) == None:
+                                self.ulAdmittedTraffic.update({nodes[netIndex+1]: 0})
+                            if self.dlAdmittedTraffic.get(nodes[netIndex]) == None:
+                                self.dlAdmittedTraffic.update({nodes[netIndex]: 0})
+                            if self.dlAdmittedTraffic.get(nodes[netIndex+1]) == None:
+                                self.dlAdmittedTraffic.update({nodes[netIndex+1]: 0})
+                            # Calculus
+                            self.ulAdmittedTraffic.update({nodes[netIndex]: self.getAdmitted(self.ulAdmittedTraffic.get(nodes[netIndex]), ulMins[netIndex], self.fluxUlMargin.get(nodes[netIndex]), beta)})
+                            self.ulAdmittedTraffic.update({nodes[netIndex+1]: self.getAdmitted(self.ulAdmittedTraffic.get(nodes[netIndex+1]), ulMins[netIndex+1], self.fluxUlMargin.get(nodes[netIndex+1]), beta)})
+                            self.dlAdmittedTraffic.update({nodes[netIndex]: self.getAdmitted(self.dlAdmittedTraffic.get(nodes[netIndex]), dlMins[netIndex], self.fluxDlMargin.get(nodes[netIndex]), beta)})
+                            self.dlAdmittedTraffic.update({nodes[netIndex+1]: self.getAdmitted(self.dlAdmittedTraffic.get(nodes[netIndex+1]), dlMins[netIndex+1], self.fluxDlMargin.get(nodes[netIndex+1]), beta)})
+                            logger.info('Allowed UL traffic 1: %f -- Allowed UL traffic 2: %f -- Allowed DL traffic 1: %f -- Allowed DL traffic 2: %f' % (self.ulAdmittedTraffic.get(nodes[netIndex]), self.ulAdmittedTraffic.get(nodes[netIndex+1]), self.dlAdmittedTraffic.get(nodes[netIndex]), self.dlAdmittedTraffic.get(nodes[netIndex+1])))
                 else:
                     logger.info('Optimal algorithm')
-            else:
-                # Normal node must read configuration set by edge nodes in tmp folder
-                logger.info('this is a normal node')
  
             time.sleep(10)
+
+
+    def getAdmitted(self, previousAdmitted, minTraffic, margin, beta):
+          previousAdmitted = float(previousAdmitted)
+          minTraffic = float(minTraffic)
+          margin = float(margin)
+          beta = float(beta)
+          if not config.getboolean('suboptimal', 'altFormula'):
+              logger.info('prev: %f -- min: %f -- margin: %f -- beta: %f' % (previousAdmitted, minTraffic, margin, beta))
+              return max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0])
+          else:
+              return min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), 0]) # FIXME: Implement a mean 
+
 
 
     def updateIngress(self, confPath):
