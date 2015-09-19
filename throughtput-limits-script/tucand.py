@@ -14,6 +14,53 @@ import os
 import paramiko
 from scp import SCPClient
 
+
+class Register():
+    registers = dict()
+    stability = 0
+    
+    def __init__(self, stability):
+        self.stability = stability
+
+    def add(self, register, key, value):
+        registerDict = self.registers.get(register)
+        if registerDict == None:
+            registerDict = {key: [value]}
+        else:
+            registerList = registerDict.get(key)
+            if registerList == None:
+                registerList = [value]
+            else:
+                if len(registerList) == int(self.stability):
+                    registerList.reverse()
+                    registerList.pop()
+                    registerList.reverse()
+                registerList.append(value)
+            registerDict.update({key: registerList})
+        self.registers.update({register: registerDict})
+
+    def last(self, register, key):
+        if self.registers.get(register) == None or self.registers.get(register).get(key) == None:
+            return 0
+        return self.registers.get(register).get(key)[-1]
+
+    def isStable(self, register, key):
+        registerDict = self.registers.get(register)
+        if registerDict == None:
+            return False
+        registerList = registerDict.get(key)
+        return registerList != None and (len(registerList) == int(self.stability))
+
+    def getAverage(self, register, key):
+        registerDict = self.registers.get(register)
+        if registerDict == None:
+            return 0.0
+        registerList = registerDict.get(key)
+        if registerList == None:
+            return 0.0
+        return sum(registerList)/len(registerList)
+
+
 class TUCANDaemon():
     # path vars
     TUCANConfFolder = '/etc/TUCAN3G'
@@ -21,20 +68,18 @@ class TUCANDaemon():
     TUCANTmpFolder = '/var/tmp'
     TUCANIpsFile = join(TUCANConfFolder, 'ips.conf') 
     TUCANPidFile = 'var/run/tucand.pid'
+    config = None
 
-    # dictionary that stores, one by link of the network, the measured dynamic capacity
-    stableDynamicCapacity = dict()
+    # registers that stores, stableDynamicCapacity, traffic UL and DL limits
+    registers = None
+
     # flux UL margin by node
     fluxUlMargin = dict()
     # flux DL margin by node
     fluxDlMargin = dict()
-    # dictionary that stores, one by node, the UL allowed traffic
-    ulAdmittedTraffic = dict()
-    # dictionary that stores, one by node, the DL allowd traffic
-    dlAdmittedTraffic = dict()
     
 
-    def __init__(self):
+    def __init__(self, config):
         # Extract some useful paths from config file
         try:
             TUCANConfFolder = config.get('general', 'etcFolder')
@@ -54,6 +99,8 @@ class TUCANDaemon():
         self.stderr_path = join(TUCANLogFolder, 'tucandaemon.log') # '/dev/tty' for debugging
         self.pidfile_path =  '/var/run/tucand.pid'
         self.pidfile_timeout = 5
+        self.config = config
+        self.registers = Register(int(config.get('suboptimal', 'capacityStability')))
 
 
     def run(self):
@@ -83,11 +130,10 @@ class TUCANDaemon():
                         k = json.loads(config.get('suboptimal', 'k'))[netIndex]
                         beta = config.get('suboptimal', 'beta')
                         capacity = dynamicCapacity[key] * k
-                        self.addDynamicCapacity(key, capacity)
+                        self.registers.add('dynamicCapacity', key, capacity)
                         logger.info("adding %f to %s capacity" % (capacity, key))
-                        #self.logDynamicList()
                         # Only when we consider measurements stable we start changing network parameters
-                        if self.isStable(key):
+                        if self.registers.isStable('dynamicCapacity', key):
                             logger.info("%s has become stable" % key)
                             # Minimum margin calculus
                             ulMins = json.loads(config.get('suboptimal', 'initialULMin'))
@@ -96,7 +142,7 @@ class TUCANDaemon():
                             dlMin = sum(dlMins[netIndex:netIndex+1])
                             minMargin = capacity - (sum(ulMins) + sum(dlMins))
                             # Effective margin calculus
-                            logger.info('Mean Dynamic Capacity: %f' % self.getMeanDynamicCapacity(key))
+                            logger.info('Mean Dynamic Capacity: %f' % self.registers.getAverage('dynamicCapacity', key))
                             # FIXME: create effectiveMargin taking into account dynamically configured limits and not fixed limits
                             effectiveMargin = capacity - (sum(ulMins) + sum(dlMins))
                             # Link margin calculus
@@ -111,21 +157,19 @@ class TUCANDaemon():
                             logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- UL flux margin 1: %f -- UL flux margin 2: %f -- DL flux margin 1: %f -- DL flux margin 2: %f' % (minMargin, effectiveMargin, linkMargin, self.fluxUlMargin.get(nodes[netIndex]), self.fluxUlMargin.get(nodes[netIndex+1]), self.fluxDlMargin.get(nodes[netIndex]), self.fluxDlMargin.get(nodes[netIndex+1])))
                             
                             # Allowed traffics
-                            # Initialization
-                            if self.ulAdmittedTraffic.get(nodes[netIndex]) == None:
-                                self.ulAdmittedTraffic.update({nodes[netIndex]: 0})
-                            if self.ulAdmittedTraffic.get(nodes[netIndex+1]) == None:
-                                self.ulAdmittedTraffic.update({nodes[netIndex+1]: 0})
-                            if self.dlAdmittedTraffic.get(nodes[netIndex]) == None:
-                                self.dlAdmittedTraffic.update({nodes[netIndex]: 0})
-                            if self.dlAdmittedTraffic.get(nodes[netIndex+1]) == None:
-                                self.dlAdmittedTraffic.update({nodes[netIndex+1]: 0})
-                            # Calculus
-                            self.ulAdmittedTraffic.update({nodes[netIndex]: self.getAdmitted(self.ulAdmittedTraffic.get(nodes[netIndex]), ulMins[netIndex], self.fluxUlMargin.get(nodes[netIndex]), beta)})
-                            self.ulAdmittedTraffic.update({nodes[netIndex+1]: self.getAdmitted(self.ulAdmittedTraffic.get(nodes[netIndex+1]), ulMins[netIndex+1], self.fluxUlMargin.get(nodes[netIndex+1]), beta)})
-                            self.dlAdmittedTraffic.update({nodes[netIndex]: self.getAdmitted(self.dlAdmittedTraffic.get(nodes[netIndex]), dlMins[netIndex], self.fluxDlMargin.get(nodes[netIndex]), beta)})
-                            self.dlAdmittedTraffic.update({nodes[netIndex+1]: self.getAdmitted(self.dlAdmittedTraffic.get(nodes[netIndex+1]), dlMins[netIndex+1], self.fluxDlMargin.get(nodes[netIndex+1]), beta)})
-                            logger.info('Allowed UL traffic 1: %f -- Allowed UL traffic 2: %f -- Allowed DL traffic 1: %f -- Allowed DL traffic 2: %f' % (self.ulAdmittedTraffic.get(nodes[netIndex]), self.ulAdmittedTraffic.get(nodes[netIndex+1]), self.dlAdmittedTraffic.get(nodes[netIndex]), self.dlAdmittedTraffic.get(nodes[netIndex+1])))
+                            traffic = self.getAdmitted(self.registers.last('ulLimits', nodes[netIndex]), ulMins[netIndex], self.fluxUlMargin.get(nodes[netIndex]), beta)
+                            self.registers.add('ulLimits', nodes[netIndex], traffic)
+
+                            traffic = self.getAdmitted(self.registers.last('ulLimits', nodes[netIndex+1]), ulMins[netIndex+1], self.fluxUlMargin.get(nodes[netIndex+1]), beta)
+                            self.registers.add('ulLimits', nodes[netIndex+1], traffic)
+
+                            traffic = self.getAdmitted(self.registers.last('dlLimits', nodes[netIndex]), dlMins[netIndex], self.fluxDlMargin.get(nodes[netIndex]), beta)
+                            self.registers.add('dlLimits', nodes[netIndex], traffic)
+
+                            traffic = self.getAdmitted(self.registers.last('dlLimits', nodes[netIndex+1]), dlMins[netIndex+1], self.fluxDlMargin.get(nodes[netIndex+1]), beta)
+                            self.registers.add('dlLimits', nodes[netIndex+1], traffic)
+
+                            logger.info('Allowed UL traffic 1: %f -- Allowed UL traffic 2: %f -- Allowed DL traffic 1: %f -- Allowed DL traffic 2: %f' % (self.registers.last('ulLimits', nodes[netIndex]), self.registers.last('ulLimits', nodes[netIndex+1]), self.registers.last('dlLimits', nodes[netIndex]), self.registers.last('dlLimits', nodes[netIndex+1])))
                 else:
                     logger.info('Optimal algorithm')
  
@@ -141,8 +185,7 @@ class TUCANDaemon():
               logger.info('prev: %f -- min: %f -- margin: %f -- beta: %f' % (previousAdmitted, minTraffic, margin, beta))
               return max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0])
           else:
-              return min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), 0]) # FIXME: Implement a mean 
-
+              return min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), 0]) # FIXME: Implement an average 
 
 
     def updateIngress(self, confPath):
@@ -153,45 +196,7 @@ class TUCANDaemon():
             os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
             os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, updateConfig.get('general', 'limit'))) # introduce a PRIO queuewith policing to maximum capacity
 
-
-    def getMeanDynamicCapacity(self, key):
-        dynCapList = self.stableDynamicCapacity.get(key)
-        if dynCapList == None:
-            return 0.0
-        return sum(dynCapList)/len(dynCapList)
-
-
-    def logDynamicList(self):
-        for entry in self.stableDynamicCapacity.keys():
-            capList = self.stableDynamicCapacity.get(entry)
-            logger.info('----')
-            for cap in capList:
-                logger.info('[ %f ]' % cap)
-            logger.info('----')
-
-
-    def addDynamicCapacity(self, key, dynamicCapacity):
-        # We need a stack of 10 elements to calculate a valid capacity
-        dynCapList = self.stableDynamicCapacity.get(key)
-        if dynCapList == None:
-            dynCapList = [ dynamicCapacity ]
-        else:
-            logger.info('stability configured: %d' % int(config.get('suboptimal', 'capacityStability')))
-            if len(dynCapList) == int(config.get('suboptimal', 'capacityStability')):
-                dynCapList.reverse()
-                dynCapList.pop()
-                dynCapList.reverse()
-            dynCapList.append(dynamicCapacity)
-        self.stableDynamicCapacity.update({key: dynCapList})
-
-
-    def isStable(self, key):
-        dynCapList = self.stableDynamicCapacity.get(key)
-        if dynCapList != None:
-            logger.info("dynamic list contains %d elements" % len(dynCapList))
-        return dynCapList != None and len(dynCapList) == int(config.get('suboptimal', 'capacityStability'))
-
-
+ 
     def readDynamicCapacity(self, tests):
         # parse json results file and return them in a dictionary we will use later
         data = dict()
@@ -283,7 +288,7 @@ if __name__ == "__main__":
     config = ConfigParser.ConfigParser()
     config.read('/etc/TUCAN3G/tucand.conf')
     
-    daemon = TUCANDaemon()
+    daemon = TUCANDaemon(config)
     logger = logging.getLogger("DaemonLog")
     logger.setLevel(logging.INFO)
     formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
