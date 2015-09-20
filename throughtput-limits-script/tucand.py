@@ -107,8 +107,9 @@ class TUCANDaemon():
         # To avoid strange behaviors if we modify file while the daemon is in execution, we first look at the file content and then 
         # we operate all the time using our memory cached file content.
         tests = self.parseTests()
-        # Initial conditions
-        self.initializeIngress()
+        # Set initial conditions (the UL edge is in charge of this
+        if config.getboolean('general', 'edge') and config.get('general', 'edgeType') == 'UL':
+            self.initializeIngress()
         # nodes from conf file
         nodes = json.loads(config.get('suboptimal', 'nodes'))
 
@@ -120,7 +121,7 @@ class TUCANDaemon():
                     self.updateIngress('/var/tmp/node-%s' % sense)
             # if we have to configure egress queues, we do it
             if (isfile('/etc/TUCAN3G/node-egress.conf')):
-                self.updateEgress('var/tmp/node-egress.conf')
+                self.updateEgress('/etc/TUCAN3G/node-egress.conf')
             # algorithms
             if config.getboolean('general', 'edge') and config.get('general', 'edgeType') == 'UL':
                 # Suboptimal algorithm
@@ -203,8 +204,6 @@ class TUCANDaemon():
         scp = SCPClient(ssh.get_transport())
         scp.put('/var/tmp/node-DL.conf' % config.get('general', 'edgeType'), '/var/tmp/')
  
-    def createConfFile():
-        
 
     def getAdmitted(self, previousAdmitted, minTraffic, margin, beta, averageTraffic):
         previousAdmitted = float(previousAdmitted)
