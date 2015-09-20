@@ -107,7 +107,7 @@ class TUCANDaemon():
         # To avoid strange behaviors if we modify file while the daemon is in execution, we first look at the file content and then 
         # we operate all the time using our memory cached file content.
         tests = self.parseTests()
-        # Set initial conditions (the UL edge is in charge of this
+        # Set initial conditions (the UL edge is in charge of this)
         if config.getboolean('general', 'edge') and config.get('general', 'edgeType') == 'UL':
             self.initializeIngress()
         # nodes from conf file
@@ -177,21 +177,21 @@ class TUCANDaemon():
                             logger.info('Allowed UL traffic 1: %f -- Allowed UL traffic 2: %f -- Allowed DL traffic 1: %f -- Allowed DL traffic 2: %f' % (self.registers.last('ulLimits', nodes[netIndex]), self.registers.last('ulLimits', nodes[netIndex+1]), self.registers.last('dlLimits', nodes[netIndex]), self.registers.last('dlLimits', nodes[netIndex+1])))
 
                             # Create ingress configuration files and send DL edge file to it
-                            updateIngressConfFiles()
+                            self.updateIngressConfFiles()
                 else:
                     logger.info('Optimal algorithm')
  
             time.sleep(10)
 
-    def updateIngressConfFiles():
+    def updateIngressConfFiles(self):
         # Some needed vars
         nodes = json.loads(config.get('suboptimal', 'nodes'))
         ulIfaces = json.loads(config.get('general', 'ulIfaces'))
         dlIfaces = json.loads(config.get('general', 'dlIfaces'))
         ulRates = [self.registers.last('ulLimits', nodes[0]), self.registers.last('ulLimits', nodes[1])]
-        dlRates = [self.registers.last('dlLimits', nodes[0]), self.registers.last('ulLimits', nodes[1])]
+        dlRates = [self.registers.last('dlLimits', nodes[0]), self.registers.last('dlLimits', nodes[1])]
 
-        for sense, edge in ['UL', 'DL'], [0, 1]:
+        for sense, edge in zip(['UL', 'DL-remote'], [0, 1]):
             remoteConfig = ConfigParser.ConfigParser()
             remoteConfFile = open('/var/tmp/node-%s.conf' % sense, 'w')
             remoteConfig.add_section('general')
@@ -202,8 +202,8 @@ class TUCANDaemon():
 
         ssh = self.createSSHClient(nodes[1])
         scp = SCPClient(ssh.get_transport())
-        scp.put('/var/tmp/node-DL.conf' % config.get('general', 'edgeType'), '/var/tmp/')
- 
+        scp.put('/var/tmp/node-DL-remote.conf', '/var/tmp/node-UL.conf')
+       
 
     def getAdmitted(self, previousAdmitted, minTraffic, margin, beta, averageTraffic):
         previousAdmitted = float(previousAdmitted)
@@ -233,20 +233,16 @@ class TUCANDaemon():
         for ifaceNumber, iface in enumerate(json.loads(updateConfig.get('general', 'egressIfaces'))):
             # preventive egress cleaning
             os.system("tc qdisc del dev %s root" % iface) 
-            # main dsmark & classifier
-            os.system("tc qdisc add dev %s handle 1:0 root dsmark indices 64 set_tc_index" % iface)
-            os.system("tc filter add dev %s parent 1:0 protocol ip prio 1 tcindex mask 0xfc shift 2" % iface)
             # main htb qdisc & class
-            os.system("tc qdisc add dev %s parent 1:0 handle 2:0 htb default 20" % iface)
-            os.system("tc class add dev %s parent 2:0 classid 2:1 htb rate %fkbps ceil %fkbps" % (iface, float(limits[ifaceNumber]), float(limits[ifaceNumber])))
+            os.system("tc qdisc add dev %s handle 2:0 root htb default 20" % iface)
+            os.system("tc class add dev %s parent 2:0 classid 2:1 htb rate %fKbit ceil %fKbit" % (iface, float(limits[ifaceNumber]), float(limits[ifaceNumber])))
             # EF Class (2:10)
-            os.system("tc class add dev %s parent 2:1 classid 2:10 htb rate %fkbps ceil %fkbps prio 1" % (iface, 0.1 * float(limits[ifaceNumber]), float(limits[ifaceNumber])))
+            os.system("tc class add dev %s parent 2:1 classid 2:10 htb rate %fKbit ceil %fKbit" % (iface, 0.1 * float(limits[ifaceNumber]), float(limits[ifaceNumber])))
             os.system("tc qdisc add dev %s parent 2:10 pfifo limit 5" % iface)
-            os.system("tc filter add dev %s parent 2:0 protocol ip prio 1 handle 0x2e tcindex classid 2:10 pass_on" % iface)
+            os.system("tc filter add dev %s parent 2:0 protocol ip prio 10 u32 match ip tos 0x10 0xff flowid 2:10" % iface)
             # BE Class (2:20)
-            os.system("tc class add dev %s parent 2:1 classid 2:20 htb rate %fkbps ceil %fkbps prio 0" % (iface, 0.9 * float(limits[ifaceNumber]), float(limits[ifaceNumber])))
-            os.system("tc qdisc add dev %s parent 2:20 red limit 60KB min 15KB max 45KB burst 20 avpkt 1000 bandwidth %fkbps probability 0.4" % (iface, float(limits[ifaceNumber])))
-            os.system("tc filter add dev %s parent 2:0 protocol ip prio 2 handle 0 tcindex mask 0 classid 2:20 pass_on" % iface)
+            os.system("tc class add dev %s parent 2:1 classid 2:20 htb rate %fKbit ceil %fKbit" % (iface, 0.9 * float(limits[ifaceNumber]), float(limits[ifaceNumber])))
+            os.system("tc qdisc add dev %s parent 2:20 red limit 60KB min 15KB max 45KB burst 20 avpkt 1000 bandwidth %fKbit probability 0.4" % (iface, float(limits[ifaceNumber])))
         
  
     def readDynamicCapacity(self, tests):
@@ -324,6 +320,7 @@ class TUCANDaemon():
        
 
     def createSSHClient(self, server):
+        logger.info('connecting to %s...' % server)
         client = paramiko.SSHClient()
         client.load_system_host_keys()
         client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
