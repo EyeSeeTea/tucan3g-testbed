@@ -118,7 +118,11 @@ class TUCANDaemon():
             for sense in ['UL', 'DL']:
                 if isfile('/var/tmp/node-%s' % sense):
                     self.updateIngress('/var/tmp/node-%s' % sense)
-            if config.getboolean('general', 'edge'):
+            # if we have to configure egress queues, we do it
+            if (isfile('/etc/TUCAN3G/node-egress.conf')):
+                self.updateEgress('var/tmp/node-egress.conf')
+            # algorithms
+            if config.getboolean('general', 'edge') and config.get('general', 'edgeType') == 'UL':
                 # Suboptimal algorithm
                 if not config.getboolean('general', 'isOptimal'):
                     try:
@@ -157,45 +161,94 @@ class TUCANDaemon():
                             logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- UL flux margin 1: %f -- UL flux margin 2: %f -- DL flux margin 1: %f -- DL flux margin 2: %f' % (minMargin, effectiveMargin, linkMargin, self.fluxUlMargin.get(nodes[netIndex]), self.fluxUlMargin.get(nodes[netIndex+1]), self.fluxDlMargin.get(nodes[netIndex]), self.fluxDlMargin.get(nodes[netIndex+1])))
                             
                             # Allowed traffics
-                            traffic = self.getAdmitted(self.registers.last('ulLimits', nodes[netIndex]), ulMins[netIndex], self.fluxUlMargin.get(nodes[netIndex]), beta)
+                            traffic = self.getAdmitted(self.registers.last('ulLimits', nodes[netIndex]), ulMins[netIndex], self.fluxUlMargin.get(nodes[netIndex]), beta, self.registers.getAverage('ulLimits', nodes[netIndex]))
                             self.registers.add('ulLimits', nodes[netIndex], traffic)
 
-                            traffic = self.getAdmitted(self.registers.last('ulLimits', nodes[netIndex+1]), ulMins[netIndex+1], self.fluxUlMargin.get(nodes[netIndex+1]), beta)
+                            traffic = self.getAdmitted(self.registers.last('ulLimits', nodes[netIndex+1]), ulMins[netIndex+1], self.fluxUlMargin.get(nodes[netIndex+1]), beta, self.registers.getAverage('ulLimits', nodes[netIndex+1]))
                             self.registers.add('ulLimits', nodes[netIndex+1], traffic)
 
-                            traffic = self.getAdmitted(self.registers.last('dlLimits', nodes[netIndex]), dlMins[netIndex], self.fluxDlMargin.get(nodes[netIndex]), beta)
+                            traffic = self.getAdmitted(self.registers.last('dlLimits', nodes[netIndex]), dlMins[netIndex], self.fluxDlMargin.get(nodes[netIndex]), beta, self.registers.getAverage('dlLimits', nodes[netIndex]))
                             self.registers.add('dlLimits', nodes[netIndex], traffic)
 
-                            traffic = self.getAdmitted(self.registers.last('dlLimits', nodes[netIndex+1]), dlMins[netIndex+1], self.fluxDlMargin.get(nodes[netIndex+1]), beta)
+                            traffic = self.getAdmitted(self.registers.last('dlLimits', nodes[netIndex+1]), dlMins[netIndex+1], self.fluxDlMargin.get(nodes[netIndex+1]), beta, self.registers.getAverage('dlLimits', nodes[netIndex+1]))
                             self.registers.add('dlLimits', nodes[netIndex+1], traffic)
 
                             logger.info('Allowed UL traffic 1: %f -- Allowed UL traffic 2: %f -- Allowed DL traffic 1: %f -- Allowed DL traffic 2: %f' % (self.registers.last('ulLimits', nodes[netIndex]), self.registers.last('ulLimits', nodes[netIndex+1]), self.registers.last('dlLimits', nodes[netIndex]), self.registers.last('dlLimits', nodes[netIndex+1])))
+
+                            # Create ingress configuration files and send DL edge file to it
+                            updateIngressConfFiles()
                 else:
                     logger.info('Optimal algorithm')
  
             time.sleep(10)
 
+    def updateIngressConfFiles():
+        # Some needed vars
+        nodes = json.loads(config.get('suboptimal', 'nodes'))
+        ulIfaces = json.loads(config.get('general', 'ulIfaces'))
+        dlIfaces = json.loads(config.get('general', 'dlIfaces'))
+        ulRates = [self.registers.last('ulLimits', nodes[0]), self.registers.last('ulLimits', nodes[1])]
+        dlRates = [self.registers.last('dlLimits', nodes[0]), self.registers.last('ulLimits', nodes[1])]
 
-    def getAdmitted(self, previousAdmitted, minTraffic, margin, beta):
-          previousAdmitted = float(previousAdmitted)
-          minTraffic = float(minTraffic)
-          margin = float(margin)
-          beta = float(beta)
-          if not config.getboolean('suboptimal', 'altFormula'):
-              logger.info('prev: %f -- min: %f -- margin: %f -- beta: %f' % (previousAdmitted, minTraffic, margin, beta))
-              return max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0])
-          else:
-              return min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), 0]) # FIXME: Implement an average 
+        for sense, edge in ['UL', 'DL'], [0, 1]:
+            remoteConfig = ConfigParser.ConfigParser()
+            remoteConfFile = open('/var/tmp/node-%s.conf' % sense, 'w')
+            remoteConfig.add_section('general')
+            remoteConfig.set('general', 'ingressIfaces', ulIfaces[edge]+dlIfaces[edge])
+            remoteConfig.set('general', 'limit', [ulRates[edge]]*len(ulIfaces[edge]+[dlRates[edge]]*len(dlIfaces[edge])))
+            remoteConfig.write(remoteConfFile)
+            remoteConfFile.close()
+
+        ssh = self.createSSHClient(nodes[1])
+        scp = SCPClient(ssh.get_transport())
+        scp.put('/var/tmp/node-DL.conf' % config.get('general', 'edgeType'), '/var/tmp/')
+ 
+    def createConfFile():
+        
+
+    def getAdmitted(self, previousAdmitted, minTraffic, margin, beta, averageTraffic):
+        previousAdmitted = float(previousAdmitted)
+        minTraffic = float(minTraffic)
+        margin = float(margin)
+        beta = float(beta)
+        if not config.getboolean('suboptimal', 'altFormula'):
+            logger.info('prev: %f -- min: %f -- margin: %f -- beta: %f' % (previousAdmitted, minTraffic, margin, beta))
+            return max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0])
+        else:
+            return min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), averageTraffic])
 
 
     def updateIngress(self, confPath):
         updateConfig = ConfigParser.ConfigParser()
         updateConfig.read(confPath)
-        for iface in json.loads(updateConfig.get('general', 'ingressIfaces')):
+        for ifaceNumber, iface in enumerate(json.loads(updateConfig.get('general', 'ingressIfaces'))):
             os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
             os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-            os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, updateConfig.get('general', 'limit'))) # introduce a PRIO queuewith policing to maximum capacity
+            os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, json.loads(updateConfig.get('general', 'limit'))[ifaceNumber])) # introduce a PRIO queuewith policing to maximum capacity
 
+
+    def updateEgress(self, confPath):
+        updateConfig = ConfigParser.ConfigParser()
+        updateConfig.read(confPath)
+        limits = json.loads(updateConfig.get('general', 'limit'))
+        for ifaceNumber, iface in enumerate(json.loads(updateConfig.get('general', 'egressIfaces'))):
+            # preventive egress cleaning
+            os.system("tc qdisc del dev %s root" % iface) 
+            # main dsmark & classifier
+            os.system("tc qdisc add dev %s handle 1:0 root dsmark indices 64 set_tc_index" % iface)
+            os.system("tc filter add dev %s parent 1:0 protocol ip prio 1 tcindex mask 0xfc shift 2" % iface)
+            # main htb qdisc & class
+            os.system("tc qdisc add dev %s parent 1:0 handle 2:0 htb default 20" % iface)
+            os.system("tc class add dev %s parent 2:0 classid 2:1 htb rate %fkbps ceil %fkbps" % (iface, float(limits[ifaceNumber]), float(limits[ifaceNumber])))
+            # EF Class (2:10)
+            os.system("tc class add dev %s parent 2:1 classid 2:10 htb rate %fkbps ceil %fkbps prio 1" % (iface, 0.1 * float(limits[ifaceNumber]), float(limits[ifaceNumber])))
+            os.system("tc qdisc add dev %s parent 2:10 pfifo limit 5" % iface)
+            os.system("tc filter add dev %s parent 2:0 protocol ip prio 1 handle 0x2e tcindex classid 2:10 pass_on" % iface)
+            # BE Class (2:20)
+            os.system("tc class add dev %s parent 2:1 classid 2:20 htb rate %fkbps ceil %fkbps prio 0" % (iface, 0.9 * float(limits[ifaceNumber]), float(limits[ifaceNumber])))
+            os.system("tc qdisc add dev %s parent 2:20 red limit 60KB min 15KB max 45KB burst 20 avpkt 1000 bandwidth %fkbps probability 0.4" % (iface, float(limits[ifaceNumber])))
+            os.system("tc filter add dev %s parent 2:0 protocol ip prio 2 handle 0 tcindex mask 0 classid 2:20 pass_on" % iface)
+        
  
     def readDynamicCapacity(self, tests):
         # parse json results file and return them in a dictionary we will use later
@@ -238,37 +291,34 @@ class TUCANDaemon():
             rates = []
             edgePosition = 0
             nodes = json.loads(config.get('suboptimal', 'nodes'))
-            ingressIfaces = json.loads(config.get('general', 'ingressIfaces'))
+            ulIfaces = json.loads(config.get('general', 'ulIfaces'))
+            dlIfaces = json.loads(config.get('general', 'dlIfaces'))
             logger.info('this is an edge node')
-            if config.get('general', 'edgeType') == 'UL':
-                rates = json.loads(config.get('suboptimal', 'initialDlMin'))
-                edgePosition = 0
-            elif config.get('general', 'edgeType') == 'DL':
-                rates = json.loads(config.get('suboptimal', 'initialUlMin'))
-                edgePosition = len(nodes)-1
-            else:
-                logger.setLevel(logging.ERROR)
-                logger.error('edge type not allowed (Only UL or DL are allowed')
-                sys.exit()
+            ulRates = json.loads(config.get('suboptimal', 'initialUlMin'))
+            dlRates = json.loads(config.get('suboptimal', 'initialDlMin'))
+            dlEdgePosition = len(nodes)-1
             for node in range(0, len(nodes)):
                 # for this node, we directly configure queues
-                if node == edgePosition:
-                    logger.info('Limiting ingress ifaces to %f kbps' % rates[edgePosition])
-                    for i, iface in enumerate(ingressIfaces[edgePosition]):
+                if node == 0: # UL
+                    logger.info('Applying initial policing')
+                    for iface in ulIfaces[0]:
                         os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
                         os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, rates[edgePosition])) # introduce a PRIO queuewith policing to maximum capacity
+                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, ulRates[0])) # introduce a PRIO queuewith policing to maximum capacity
+                    for iface in dlIfaces[0]:
+                        os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
+                        os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
+                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, dlRates[0])) # introduce a PRIO queuewith policing to maximum capacity
+                    
                 # for the rest of nodes we create a config file and send it to them by SSH protocol
-                else:
-                    logger.info('Limiting remote ingress ifaces to %f kbps' % rates[node])
+                elif node == dlEdgePosition:
                     remoteConfig = ConfigParser.ConfigParser()
                     remoteConfFile = open('/var/tmp/node-%s.conf' % config.get('general', 'edgeType'), 'w')
                     remoteConfig.add_section('general')
-                    remoteConfig.set('general', 'ingressIfaces', ingressIfaces[node])
-                    remoteConfig.set('general', 'limit', rates[node])
+                    remoteConfig.set('general', 'ingressIfaces', ulIfaces[1]+dlIfaces[1])
+                    remoteConfig.set('general', 'limit', [ulRates[1]]*len(ulIfaces[1]+[dlRates[1]]*len(dlIfaces[1])))
                     remoteConfig.write(remoteConfFile)
                     remoteConfFile.close()
-                    # TODO: send it with paramiko
                     ssh = self.createSSHClient(nodes[node])
                     scp = SCPClient(ssh.get_transport())
                     scp.put('/var/tmp/node-%s.conf' % config.get('general', 'edgeType'), '/var/tmp/')
