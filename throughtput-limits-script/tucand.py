@@ -196,7 +196,7 @@ class TUCANDaemon():
             remoteConfFile = open('/var/tmp/node-%s.conf' % sense, 'w')
             remoteConfig.add_section('general')
             remoteConfig.set('general', 'ingressIfaces', ulIfaces[edge]+dlIfaces[edge])
-            remoteConfig.set('general', 'limit', [ulRates[edge]]*len(ulIfaces[edge]+[dlRates[edge]]*len(dlIfaces[edge])))
+            remoteConfig.set('general', 'limit', ([ulRates[edge]]*len(ulIfaces[edge])+([dlRates[edge]]*len(dlIfaces[edge]))))
             remoteConfig.write(remoteConfFile)
             remoteConfFile.close()
 
