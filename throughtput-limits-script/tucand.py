@@ -311,7 +311,7 @@ class TUCANDaemon():
                     remoteConfFile = open('/var/tmp/node-%s.conf' % config.get('general', 'edgeType'), 'w')
                     remoteConfig.add_section('general')
                     remoteConfig.set('general', 'ingressIfaces', ulIfaces[1]+dlIfaces[1])
-                    remoteConfig.set('general', 'limit', [ulRates[1]]*len(ulIfaces[1]+[dlRates[1]]*len(dlIfaces[1])))
+                    remoteConfig.set('general', 'limit', ([ulRates[1]]*len(ulIfaces[1])+([dlRates[1]]*len(dlIfaces[1]))))
                     remoteConfig.write(remoteConfFile)
                     remoteConfFile.close()
                     ssh = self.createSSHClient(nodes[node])
