@@ -227,8 +227,8 @@ class TUCANDaemon():
             logger.info("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
             os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
             logger.info("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-            os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dKbit burst 18k drop flowid :1" % (iface, math.floor(json.loads(updateConfig.get('general', 'limit'))[ifaceNumber]))) # introduce a PRIO queuewith policing to maximum capacity
-            logger.info("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dKbit burst 18k drop flowid :1" % (iface, math.floor(json.loads(updateConfig.get('general', 'limit'))[ifaceNumber]))) # introduce a PRIO queuewith policing to maximum capacity
+            os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbit burst 18k drop flowid :1" % (iface, math.floor(json.loads(updateConfig.get('general', 'limit'))[ifaceNumber]))) # introduce a PRIO queuewith policing to maximum capacity
+            logger.info("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbit burst 18k drop flowid :1" % (iface, math.floor(json.loads(updateConfig.get('general', 'limit'))[ifaceNumber]))) # introduce a PRIO queuewith policing to maximum capacity
 
 
     def updateEgress(self, confPath):
@@ -243,20 +243,20 @@ class TUCANDaemon():
             # main htb qdisc & class
             os.system("tc qdisc add dev %s handle 2:0 root htb default 20" % iface)
             logger.info("tc qdisc add dev %s handle 2:0 root htb default 20" % iface)
-            os.system("tc class add dev %s parent 2:0 classid 2:1 htb rate %dKbit ceil %dKbit" % (iface, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-            logger.info("tc class add dev %s parent 2:0 classid 2:1 htb rate %dKbit ceil %dKbit" % (iface, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+            os.system("tc class add dev %s parent 2:0 classid 2:1 htb rate %dkbit ceil %dkbit" % (iface, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+            logger.info("tc class add dev %s parent 2:0 classid 2:1 htb rate %dkbit ceil %dkbit" % (iface, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
             # EF Class (2:10)
-            os.system("tc class add dev %s parent 2:1 classid 2:10 htb rate %dKbit ceil %dKbit" % (iface, math.floor(0.1 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-            logger.info("tc class add dev %s parent 2:1 classid 2:10 htb rate %dKbit ceil %dKbit" % (iface, math.floor(0.1 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+            os.system("tc class add dev %s parent 2:1 classid 2:10 htb rate %dkbit ceil %dkbit" % (iface, math.floor(0.1 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+            logger.info("tc class add dev %s parent 2:1 classid 2:10 htb rate %dkbit ceil %dkbit" % (iface, math.floor(0.1 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
             os.system("tc qdisc add dev %s parent 2:10 pfifo limit 5" % iface)
             logger.info("tc qdisc add dev %s parent 2:10 pfifo limit 5" % iface)
             os.system("tc filter add dev %s parent 2:0 protocol ip prio 10 u32 match ip tos 0x10 0xff flowid 2:10" % iface)
             logger.info("tc filter add dev %s parent 2:0 protocol ip prio 10 u32 match ip tos 0x10 0xff flowid 2:10" % iface)
             # BE Class (2:20)
-            os.system("tc class add dev %s parent 2:1 classid 2:20 htb rate %dKbit ceil %dKbit" % (iface, math.floor(0.9 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-            logger.info("tc class add dev %s parent 2:1 classid 2:20 htb rate %dKbit ceil %dKbit" % (iface, math.floor(0.9 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-            os.system("tc qdisc add dev %s parent 2:20 red limit 60KB min 15KB max 45KB burst 20 avpkt 1000 bandwidth %dKbit probability 0.4" % (iface, math.floor(float(limits[ifaceNumber]))))
-            logger.info("tc qdisc add dev %s parent 2:20 red limit 60KB min 15KB max 45KB burst 20 avpkt 1000 bandwidth %dKbit probability 0.4" % (iface, math.floor(float(limits[ifaceNumber]))))
+            os.system("tc class add dev %s parent 2:1 classid 2:20 htb rate %dkbit ceil %dkbit" % (iface, math.floor(0.9 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+            logger.info("tc class add dev %s parent 2:1 classid 2:20 htb rate %dkbit ceil %dkbit" % (iface, math.floor(0.9 * float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+            os.system("tc qdisc add dev %s parent 2:20 red limit 60KB min 15KB max 45KB burst 20 avpkt 1000 bandwidth %dkbit probability 0.4" % (iface, math.floor(float(limits[ifaceNumber]))))
+            logger.info("tc qdisc add dev %s parent 2:20 red limit 60KB min 15KB max 45KB burst 20 avpkt 1000 bandwidth %dkbit probability 0.4" % (iface, math.floor(float(limits[ifaceNumber]))))
         
  
     def readDynamicCapacity(self, tests):
@@ -313,11 +313,11 @@ class TUCANDaemon():
                     for iface in ulIfaces[0]:
                         os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
                         os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dKbit burst 18k drop flowid :1" % (iface, math.floor(ulRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
+                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbit burst 18k drop flowid :1" % (iface, math.floor(ulRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
                     for iface in dlIfaces[0]:
                         os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
                         os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dKbit burst 18k drop flowid :1" % (iface, math.floor(dlRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
+                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbit burst 18k drop flowid :1" % (iface, math.floor(dlRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
                     
                 # for the rest of nodes we create a config file and send it to them by SSH protocol
                 elif node == dlEdgePosition:
