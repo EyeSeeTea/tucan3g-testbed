@@ -12,6 +12,7 @@ from daemon import runner
 import sys
 import os
 import paramiko
+import math
 from scp import SCPClient
 
 
@@ -221,14 +222,13 @@ class TUCANDaemon():
         updateConfig = ConfigParser.ConfigParser()
         updateConfig.read(confPath)
         logger.info("reading %s file" % confPath)
-        logger.info('%s' % updateConfig.get('general', 'ingressIfaces'))
         for ifaceNumber, iface in enumerate(json.loads(updateConfig.get('general', 'ingressIfaces'))):
             os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
             logger.info("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
             os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
             logger.info("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-            os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, json.loads(updateConfig.get('general', 'limit'))[ifaceNumber])) # introduce a PRIO queuewith policing to maximum capacity
-            logger.info("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, json.loads(updateConfig.get('general', 'limit'))[ifaceNumber])) # introduce a PRIO queuewith policing to maximum capacity
+            os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbps burst 18k drop flowid :1" % (iface, math.floor(json.loads(updateConfig.get('general', 'limit'))[ifaceNumber]))) # introduce a PRIO queuewith policing to maximum capacity
+            logger.info("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbps burst 18k drop flowid :1" % (iface, math.floor(json.loads(updateConfig.get('general', 'limit'))[ifaceNumber]))) # introduce a PRIO queuewith policing to maximum capacity
 
 
     def updateEgress(self, confPath):
@@ -304,11 +304,11 @@ class TUCANDaemon():
                     for iface in ulIfaces[0]:
                         os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
                         os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, ulRates[0])) # introduce a PRIO queuewith policing to maximum capacity
+                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbps burst 18k drop flowid :1" % (iface, math.floor(ulRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
                     for iface in dlIfaces[0]:
                         os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
                         os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, dlRates[0])) # introduce a PRIO queuewith policing to maximum capacity
+                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbps burst 18k drop flowid :1" % (iface, math.floor(dlRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
                     
                 # for the rest of nodes we create a config file and send it to them by SSH protocol
                 elif node == dlEdgePosition:
