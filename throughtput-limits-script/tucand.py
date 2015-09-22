@@ -117,8 +117,8 @@ class TUCANDaemon():
         while True:
             # if there's a configuration order from an edge node, we follow it
             for sense in ['UL', 'DL']:
-                if isfile('/var/tmp/node-%s' % sense):
-                    self.updateIngress('/var/tmp/node-%s' % sense)
+                if isfile('/var/tmp/node-%s.conf' % sense):
+                    self.updateIngress('/var/tmp/node-%s.conf' % sense)
             # if we have to configure egress queues, we do it
             if (isfile('/etc/TUCAN3G/node-egress.conf')):
                 self.updateEgress('/etc/TUCAN3G/node-egress.conf')
@@ -195,7 +195,7 @@ class TUCANDaemon():
             remoteConfig = ConfigParser.ConfigParser()
             remoteConfFile = open('/var/tmp/node-%s.conf' % sense, 'w')
             remoteConfig.add_section('general')
-            remoteConfig.set('general', 'ingressIfaces', ulIfaces[edge]+dlIfaces[edge])
+            remoteConfig.set('general', 'ingressIfaces', json.dumps(ulIfaces[edge]+dlIfaces[edge]))
             remoteConfig.set('general', 'limit', ([ulRates[edge]]*len(ulIfaces[edge])+([dlRates[edge]]*len(dlIfaces[edge]))))
             remoteConfig.write(remoteConfFile)
             remoteConfFile.close()
@@ -220,10 +220,15 @@ class TUCANDaemon():
     def updateIngress(self, confPath):
         updateConfig = ConfigParser.ConfigParser()
         updateConfig.read(confPath)
+        logger.info("reading %s file" % confPath)
+        logger.info('%s' % updateConfig.get('general', 'ingressIfaces'))
         for ifaceNumber, iface in enumerate(json.loads(updateConfig.get('general', 'ingressIfaces'))):
             os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
+            logger.info("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
             os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
+            logger.info("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
             os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, json.loads(updateConfig.get('general', 'limit'))[ifaceNumber])) # introduce a PRIO queuewith policing to maximum capacity
+            logger.info("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %fkbps burst 18k drop flowid :1" % (iface, json.loads(updateConfig.get('general', 'limit'))[ifaceNumber])) # introduce a PRIO queuewith policing to maximum capacity
 
 
     def updateEgress(self, confPath):
@@ -308,7 +313,7 @@ class TUCANDaemon():
                 # for the rest of nodes we create a config file and send it to them by SSH protocol
                 elif node == dlEdgePosition:
                     remoteConfig = ConfigParser.ConfigParser()
-                    remoteConfFile = open('/var/tmp/node-%s.conf' % config.get('general', 'edgeType'), 'w')
+                    remoteConfFile = open('/var/tmp/node-remote-initialization.conf', 'w')
                     remoteConfig.add_section('general')
                     remoteConfig.set('general', 'ingressIfaces', ulIfaces[1]+dlIfaces[1])
                     remoteConfig.set('general', 'limit', ([ulRates[1]]*len(ulIfaces[1])+([dlRates[1]]*len(dlIfaces[1]))))
@@ -316,7 +321,7 @@ class TUCANDaemon():
                     remoteConfFile.close()
                     ssh = self.createSSHClient(nodes[node])
                     scp = SCPClient(ssh.get_transport())
-                    scp.put('/var/tmp/node-%s.conf' % config.get('general', 'edgeType'), '/var/tmp/')
+                    scp.put('/var/tmp/node-remote-initialization.conf', '/var/tmp/node-UL.conf')
        
 
     def createSSHClient(self, server):
