@@ -44,6 +44,7 @@ start)
   # Check ips.conf and tucand.conf existance
   
   logger $log_level -t $log_tag -s "Launching daemon..."
+  modprobe ifb
   python /etc/TUCAN3G/tucand.py start
   logger $log_level -t $log_tag -s "Done"
   ;;
@@ -54,6 +55,7 @@ stop)
   ;;
 restart)
   logger $log_level -t $log_tag -s "Restarting daemon..."
+  modprobe ifb
   python /etc/TUCAN3G/tucand.py restart
   logger $log_level -t $log_tag -s "Done"
   ;;
