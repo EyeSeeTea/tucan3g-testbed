@@ -13,6 +13,7 @@ import sys
 import os
 import paramiko
 import math
+import operator
 from scp import SCPClient
 
 
@@ -111,7 +112,8 @@ class TUCANDaemon():
         # Set initial conditions (the UL edge is in charge of this)
         if config.getboolean('rol', 'edge') and config.get('rol', 'edgeType') == 'UL':
             self.initializeIngress()
-        # nodes from conf file
+        # nodes and gateways to hnbs from conf file
+        hnbGateways = json.loads(config.get('hnbs', 'hnbGateways'))
         nodes = json.loads(config.get('algorithms', 'nodes'))
 
         # Main loop 
@@ -159,7 +161,7 @@ class TUCANDaemon():
                         # Traffic flux margins
                         # In a network, the most close to the UL edge
                         for hnbIndex, hnb in enumerate(hnbGateways):
-                            for senses in ['UL', 'DL']:
+                            for sense in ['UL', 'DL']:
                                 self.registers.add('flux%smargin' % sense, hnb, ulMins[hnbIndex]/(ulMinSum+dlMinSum))
 
                                 logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- %s: %f ' % (minMargin, effectiveMargin, linkMargin, 'flux%smargin' % sense, self.registers.last('flux%smargin' % sense, hnb)))
@@ -178,18 +180,62 @@ class TUCANDaemon():
 
     def updateIngressConfFiles(self):
         # Some needed vars
-        nodes = json.loads(config.get('algorithms', 'nodes'))
-        ulIfaces = json.loads(config.get('hnbs', 'ulIfaces'))
-        dlIfaces = json.loads(config.get('hnbs', 'dlIfaces'))
-        ulRates = [self.registers.last('ULLimits', nodes[0]), self.registers.last('ULLimits', nodes[1])]
-        dlRates = [self.registers.last('DLLimits', nodes[0]), self.registers.last('DLLimits', nodes[1])]
+        nodes = json.loads(config.get('hnbs', 'hnbGateways'))
+        hnbNetworks = json.loads(config.get('hnbs', 'hnbNetworks'))
 
-        for sense, edge in zip(['UL', 'DL-remote'], [0, 1]):
+        ulIfaces = json.loads(config.get('hnbs', 'ulIfaces'))
+        ulIfbIfaces = json.loads(config.get('hnbs', 'ulIfbIfaces'))
+        ulHtbQueues = json.loads(config.get('hnbs', 'ulHtbQueues'))
+        ulMarks = json.loads(config.get('hnbs', 'ulMarks'))
+        ulRates = [self.registers.last('ULLimits', nodes[0]), self.registers.last('ULLimits', nodes[1])]
+
+        dlIfaces = json.loads(config.get('hnbs', 'dlIfaces'))
+        dlIfbIfaces = json.loads(config.get('hnbs', 'dlIfbIfaces'))
+        dlHtbQueues = json.loads(config.get('hnbs', 'dlHtbQueues'))
+        dlMarks = json.loads(config.get('hnbs', 'dlMarks'))
+        dlRates = [self.registers.last('DLLimits', nodes[0]), self.registers.last('DLLimits', nodes[1])]
+        
+            
+
+        for sense, edge, ifaces, ifbIfaces, htbQueues, marks, rates in zip(['UL', 'DL-remote'], [0, 1], [ulIfaces, dlIfaces], [ulIfbIfaces, dlIfbIfaces], [ulHtbQueues, dlHtbQueues], [ulMarks, dlMarks], [ulRates, dlRates]):
+
             remoteConfig = ConfigParser.ConfigParser()
             remoteConfFile = open('/var/tmp/node-%s.conf' % sense, 'w')
+
+            # Section policing
             remoteConfig.add_section('policing')
-            remoteConfig.set('policing', 'ingressIfaces', json.dumps(ulIfaces[edge]+dlIfaces[edge]))
-            remoteConfig.set('policing', 'limit', ([ulRates[edge]]*len(ulIfaces[edge])+([dlRates[edge]]*len(dlIfaces[edge]))))
+
+            # ingressIfaces
+            ifacesToWrite = reduce(operator.add, ifaces)
+            logger.info('ifaces to write %s' % ifacesToWrite)
+            remoteConfig.set('policing', 'ingressIfaces', json.dumps(ifacesToWrite))
+
+            # ifbIfaces
+            ifacesToWrite = reduce(operator.add, ifbIfaces)
+            logger.info('ifb ifaces to write %s' % ifacesToWrite)
+            remoteConfig.set('policing', 'ifbIfaces', json.dumps(ifacesToWrite))
+            
+            # htbQueues
+            htbQueuesToWrite = reduce(operator.add, htbQueues)
+            logger.info('htb queues to write %s' % htbQueuesToWrite)
+            remoteConfig.set('policing', 'htbQueues', json.dumps(htbQueuesToWrite))
+
+            # marks
+            marksToWrite = reduce(operator.add, marks)
+            logger.info('marks to write %s' % marksToWrite)
+            remoteConfig.set('policing', 'marks', json.dumps(marksToWrite))
+
+            # networks
+            networksToWrite = reduce(operator.add, hnbNetworks)
+            logger.info('networks to write %s' % networksToWrite)
+            remoteConfig.set('policing', 'hnbNetworks', json.dumps(networksToWrite))
+            
+            # limits
+            logger.info('rates: %s' % rates)
+            remoteConfig.set('policing', 'limit', json.dumps(rates))
+            # limits
+            #remoteConfig.set('policing', 'limit', ([ulRates[edge]]*len(ulIfaces[edge])+([dlRates[edge]]*len(dlIfaces[edge]))))
+            #logger.info('limit-old: %s' % [ulRates[edge]]*len(ulIfaces[edge])+([dlRates[edge]]*len(dlIfaces[edge])))
             remoteConfig.write(remoteConfFile)
             remoteConfFile.close()
 
@@ -218,7 +264,7 @@ class TUCANDaemon():
         ifbIfaces = json.loads(updateConfig.get('policing', 'ifbIfaces'))
         htbQueues = json.loads(updateConfig.get('policing', 'htbQueues'))
         marks = json.loads(updateConfig.get('policing', 'marks'))
-        hnbNetworks = json.loads(updateConfig.get('policing, hnbNetworks'))
+        hnbNetworks = json.loads(updateConfig.get('policing', 'hnbNetworks'))
         logger.info("reading %s file" % confPath)
         
         os.system("iptables -t mangle -F") 
@@ -228,6 +274,9 @@ class TUCANDaemon():
         os.system("iptables -t mangle -N QOS")
         logger.info("iptables -t mangle -N QOS")
         for ifaceNumber, iface in enumerate(ifaces):
+            if math.floor(float(limits[ifaceNumber])) == 0:
+                logger.info('cannot establish rate 0')
+                continue
             os.system("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
             logger.info("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
             os.system("iptables -t mangle -A OUTPUT -o %s -j QOS" % iface)
@@ -248,19 +297,20 @@ class TUCANDaemon():
             os.system("tc class add dev %s parent 3: classid 3:3 htb rate %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
             logger.info("tc class add dev %s parent 3: classid 3:3 htb rate %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
             # HTB 3:31 to receive default traffic
-            os.system("tc class dev %s parent 3:3 classid 3:31 htb rate 0kbit ceil %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
-            logger.info("tc class dev %s parent 3:3 classid 3:31 htb rate 0kbit ceil %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
+            os.system("tc class add dev %s parent 3:3 classid 3:31 htb rate 100kbit ceil %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
+            logger.info("tc class add dev %s parent 3:3 classid 3:31 htb rate 100kbit ceil %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
 
             # per-HNB queues
-            for queueNumber, queue in enumerate(htbQueues[ifaceNumber]):
-                os.system("tc class dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-                logger.info("tc class dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-                os.system("tc filter add dev %s parent 3:0 protocol ip handle %s flowid %s" % (ifbIfaces[ifaceNumber], marks[ifaceNumber][queueNumber]), queue)
-                logger.info("tc filter add dev %s parent 3:0 protocol ip handle %s flowid %s" % (ifbIfaces[ifaceNumber], marks[ifaceNumber][queueNumber]), queue)
+            for queueNumber, queue in enumerate(htbQueues):
+                logger.info('setting iface %s -- ifbIface %s -- queue %s -- network %s' % (iface, ifbIfaces[ifaceNumber], queue, hnbNetworks[queueNumber]))
+                os.system("tc class add dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+                logger.info("tc class add dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
+                os.system("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
+                logger.info("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
                 os.system("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
                 logger.info("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
-                os.system("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[iface][queueNumber], marks[iface][queueNumber]))
-                logger.info("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[iface][queueNumber], marks[iface][queueNumber]))
+                os.system("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
+                logger.info("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
                 os.system("iptables -t mangle -A QOS -j CONNMARK --save-mark")
                 logger.info("iptables -t mangle -A QOS -j CONNMARK --save-mark")
                 os.system("tc filter add dev %s parent ffff: protocol ip u32 match u32 0 0 action xt -j CONNMARK --restore-mark action mirred egress redirect dev %s flowid ffff:%d" % (iface, ifbIfaces[ifaceNumber], queueNumber+1))
@@ -326,6 +376,7 @@ class TUCANDaemon():
             rates = []
             edgePosition = 0
             nodes = json.loads(config.get('algorithms', 'nodes'))
+            logger.info('%s' % config.get('hnbs', 'ulIfaces'))
             ulIfaces = json.loads(config.get('hnbs', 'ulIfaces'))
             dlIfaces = json.loads(config.get('hnbs', 'dlIfaces'))
             logger.info('this is an edge node')
@@ -350,7 +401,7 @@ class TUCANDaemon():
                     remoteConfig = ConfigParser.ConfigParser()
                     remoteConfFile = open('/var/tmp/node-remote-initialization.conf', 'w')
                     remoteConfig.add_section('policing')
-                    remoteConfig.set('policing', 'ingressIfaces', ulIfaces[1]+dlIfaces[1])
+                    remoteConfig.set('policing', 'ingressIfaces', json.dumps(ulIfaces[1]+dlIfaces[1]))
                     remoteConfig.set('policing', 'limit', ([ulRates[1]]*len(ulIfaces[1])+([dlRates[1]]*len(dlIfaces[1]))))
                     remoteConfig.write(remoteConfFile)
                     remoteConfFile.close()
