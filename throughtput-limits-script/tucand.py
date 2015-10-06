@@ -98,7 +98,7 @@ class TUCANDaemon():
         # Daemon
         self.stdin_path = '/dev/null'
         self.stdout_path = join(TUCANLogFolder, 'tucandaemon.log') # '/dev/tty' for debugging
-        self.stderr_path = join(TUCANLogFolder, 'tucandaemon.log') # '/dev/tty' for debugging
+        self.stderr_path = join(TUCANLogFolder, 'tucandaemon.err') # '/dev/tty' for debugging
         self.pidfile_path =  '/var/run/tucand.pid'
         self.pidfile_timeout = 5
         self.config = config
@@ -111,7 +111,13 @@ class TUCANDaemon():
         tests = self.parseTests()
         # Set initial conditions (the UL edge is in charge of this)
         if config.getboolean('rol', 'edge') and config.get('rol', 'edgeType') == 'UL':
-            self.initializeIngress()
+            self.updateIngressConfFiles(initialize=True)
+            for sense in ['UL', 'DL']:
+                if isfile('/var/tmp/node-%s.conf' % sense):
+                    self.updateIngress('/var/tmp/node-%s.conf' % sense, initialize=True)
+        # if we have to configure egress queues, we do it
+        if (isfile('/etc/TUCAN3G/node-egress.conf')):
+            self.updateEgress('/etc/TUCAN3G/node-egress.conf')
         # nodes and gateways to hnbs from conf file
         hnbGateways = json.loads(config.get('hnbs', 'hnbGateways'))
         nodes = json.loads(config.get('algorithms', 'nodes'))
@@ -122,9 +128,6 @@ class TUCANDaemon():
             for sense in ['UL', 'DL']:
                 if isfile('/var/tmp/node-%s.conf' % sense):
                     self.updateIngress('/var/tmp/node-%s.conf' % sense)
-            # if we have to configure egress queues, we do it
-            if (isfile('/etc/TUCAN3G/node-egress.conf')):
-                self.updateEgress('/etc/TUCAN3G/node-egress.conf')
             # algorithms
             if config.getboolean('rol', 'edge') and config.get('rol', 'edgeType') == 'UL':
                 try:
@@ -178,7 +181,7 @@ class TUCANDaemon():
  
             time.sleep(10)
 
-    def updateIngressConfFiles(self):
+    def updateIngressConfFiles(self, initialize=False):
         # Some needed vars
         nodes = json.loads(config.get('hnbs', 'hnbGateways'))
         hnbNetworks = json.loads(config.get('hnbs', 'hnbNetworks'))
@@ -187,13 +190,21 @@ class TUCANDaemon():
         ulIfbIfaces = json.loads(config.get('hnbs', 'ulIfbIfaces'))
         ulHtbQueues = json.loads(config.get('hnbs', 'ulHtbQueues'))
         ulMarks = json.loads(config.get('hnbs', 'ulMarks'))
-        ulRates = [self.registers.last('ULLimits', nodes[0]), self.registers.last('ULLimits', nodes[1])]
+        ulRates = []
+        if initialize:
+            ulRates = json.loads(config.get('algorithms', 'initialULMin'))
+        else:
+            ulRates = [self.registers.last('ULLimits', nodes[0]), self.registers.last('ULLimits', nodes[1])]
 
         dlIfaces = json.loads(config.get('hnbs', 'dlIfaces'))
         dlIfbIfaces = json.loads(config.get('hnbs', 'dlIfbIfaces'))
         dlHtbQueues = json.loads(config.get('hnbs', 'dlHtbQueues'))
         dlMarks = json.loads(config.get('hnbs', 'dlMarks'))
-        dlRates = [self.registers.last('DLLimits', nodes[0]), self.registers.last('DLLimits', nodes[1])]
+        dlRates = []
+        if initialize:
+            dlRates = json.loads(config.get('algorithms', 'initialDLMin'))
+        else:
+            dlRates = [self.registers.last('DLLimits', nodes[0]), self.registers.last('DLLimits', nodes[1])]
         
             
 
@@ -214,9 +225,14 @@ class TUCANDaemon():
             ifacesToWrite = reduce(operator.add, ifbIfaces)
             logger.info('ifb ifaces to write %s' % ifacesToWrite)
             remoteConfig.set('policing', 'ifbIfaces', json.dumps(ifacesToWrite))
-            
+           
             # htbQueues
-            htbQueuesToWrite = reduce(operator.add, htbQueues)
+            logger.info('htb queues %s' % htbQueues)
+            htbQueuesToWrite = []
+            for queues in htbQueues:
+                htbQueuesToWrite += [queues]
+            #for ifbIfaceNumber, ifbIface in enumerate(ifbIfaces):
+            #    htbQueuesToWrite +=  htbQueues[ifbIfaceNumber]
             logger.info('htb queues to write %s' % htbQueuesToWrite)
             remoteConfig.set('policing', 'htbQueues', json.dumps(htbQueuesToWrite))
 
@@ -234,8 +250,6 @@ class TUCANDaemon():
             logger.info('rates: %s' % rates)
             remoteConfig.set('policing', 'limit', json.dumps(rates))
             # limits
-            #remoteConfig.set('policing', 'limit', ([ulRates[edge]]*len(ulIfaces[edge])+([dlRates[edge]]*len(dlIfaces[edge]))))
-            #logger.info('limit-old: %s' % [ulRates[edge]]*len(ulIfaces[edge])+([dlRates[edge]]*len(dlIfaces[edge])))
             remoteConfig.write(remoteConfFile)
             remoteConfFile.close()
 
@@ -256,7 +270,7 @@ class TUCANDaemon():
             return min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), averageTraffic])
 
 
-    def updateIngress(self, confPath):
+    def updateIngress(self, confPath, initialize=False):
         updateConfig = ConfigParser.ConfigParser()
         updateConfig.read(confPath)
         limits = json.loads(updateConfig.get('policing', 'limit'))
@@ -266,54 +280,77 @@ class TUCANDaemon():
         marks = json.loads(updateConfig.get('policing', 'marks'))
         hnbNetworks = json.loads(updateConfig.get('policing', 'hnbNetworks'))
         logger.info("reading %s file" % confPath)
-        
-        os.system("iptables -t mangle -F") 
-        logger.info("iptables -t mangle -F") 
-        os.system("iptables -t mangle -X QOS") 
-        logger.info("iptables -t mangle -X QOS") 
-        os.system("iptables -t mangle -N QOS")
-        logger.info("iptables -t mangle -N QOS")
+
+        # this controls if tc commands must add the rules or simply change previous one
+        action = 'change'
+        if initialize:
+            action = 'add'
+        # this controls that filter matching hnb networks search in the appropiate ip field
+        field = 'dst'
+        if config.get('rol', 'edgeType') == 'DL':
+            field = 'src'
+
+        if initialize:        
+            os.system("iptables -t mangle -F") 
+            logger.info("iptables -t mangle -F") 
+            os.system("iptables -t mangle -X QOS") 
+            logger.info("iptables -t mangle -X QOS") 
+            os.system("iptables -t mangle -N QOS")
+            logger.info("iptables -t mangle -N QOS")
+            os.system("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
+            logger.info("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
         for ifaceNumber, iface in enumerate(ifaces):
             if math.floor(float(limits[ifaceNumber])) == 0:
                 logger.info('cannot establish rate 0')
                 continue
-            os.system("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
-            logger.info("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
-            os.system("iptables -t mangle -A OUTPUT -o %s -j QOS" % iface)
-            logger.info("iptables -t mangle -A OUTPUT -o %s -j QOS" % iface)
-            # preventive ingress cleaning
-            os.system("tc qdisc del dev %s ingress" % iface) 
-            logger.info("tc qdisc del dev %s ingress" % iface)
-            os.system("tc qdisc del dev %s root" % ifbIfaces[ifaceNumber])
-            logger.info("tc qdisc del dev %s root" % ifbIfaces[ifaceNumber])
-            os.system("tc qdisc del dev %s ingress" % ifbIfaces[ifaceNumber])
-            logger.info("tc qdisc del dev %s ingress" % ifbIfaces[ifaceNumber])
-            # adding ingress queue
-            os.system("tc qdisc add dev %s ingress handle ffff:" % iface)
-            logger.info("tc qdisc add dev %s ingress handle ffff:" % iface)
-            # parent HTB default traffic to 3:31
-            os.system("tc qdisc add dev %s root handle 3: htb default 31" % ifbIfaces[ifaceNumber])
-            logger.info("tc qdisc add dev %s root handle 3: htb default 31" % ifbIfaces[ifaceNumber])
-            os.system("tc class add dev %s parent 3: classid 3:3 htb rate %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
-            logger.info("tc class add dev %s parent 3: classid 3:3 htb rate %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
+            if initialize:
+                os.system("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
+                logger.info("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
+                os.system("iptables -t mangle -A OUTPUT -o %s -j QOS" % iface)
+                logger.info("iptables -t mangle -A OUTPUT -o %s -j QOS" % iface)
+                # preventive ingress cleaning
+                os.system("tc qdisc del dev %s ingress" % iface) 
+                logger.info("tc qdisc del dev %s ingress" % iface)
+                os.system("tc qdisc del dev %s root" % ifbIfaces[ifaceNumber])
+                logger.info("tc qdisc del dev %s root" % ifbIfaces[ifaceNumber])
+                os.system("tc qdisc del dev %s ingress" % ifbIfaces[ifaceNumber])
+                logger.info("tc qdisc del dev %s ingress" % ifbIfaces[ifaceNumber])
+                # adding ingress queue
+                os.system("tc qdisc add dev %s ingress handle ffff:" % iface)
+                logger.info("tc qdisc add dev %s ingress handle ffff:" % iface)
+                # preventively we set the ingress interface up
+                os.system("ip link set dev %s up" % ifbIfaces[ifaceNumber])
+                logger.info("ip link set dev %s up" % ifbIfaces[ifaceNumber])
+                # parent HTB default traffic to 3:31
+                os.system("tc qdisc add dev %s root handle 3: htb default 31" % ifbIfaces[ifaceNumber])
+                logger.info("tc qdisc add dev %s root handle 2: htb default 31" % ifbIfaces[ifaceNumber])
+
+            # add or change queues traffic limit
+            os.system("tc class %s dev %s parent 3: classid 3:3 htb rate %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
+            logger.info("tc class %s dev %s parent 3: classid 3:3 htb rate %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
             # HTB 3:31 to receive default traffic
-            os.system("tc class add dev %s parent 3:3 classid 3:31 htb rate 100kbit ceil %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
-            logger.info("tc class add dev %s parent 3:3 classid 3:31 htb rate 100kbit ceil %dkbit" % (ifbIfaces[ifaceNumber], math.floor(float(limits[ifaceNumber]))))
+            os.system("tc class %s dev %s parent 3:3 classid 3:31 htb rate 10kbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
+            logger.info("tc class %s dev %s parent 3:3 classid 3:31 htb rate 10kbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
+                
 
             # per-HNB queues
-            for queueNumber, queue in enumerate(htbQueues):
+            for queueNumber, queue in enumerate(htbQueues[ifaceNumber]):
                 logger.info('setting iface %s -- ifbIface %s -- queue %s -- network %s' % (iface, ifbIfaces[ifaceNumber], queue, hnbNetworks[queueNumber]))
-                os.system("tc class add dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-                logger.info("tc class add dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(limits[ifaceNumber]))))
-                os.system("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
-                logger.info("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
-                os.system("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
-                logger.info("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
-                os.system("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
-                logger.info("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
-                os.system("iptables -t mangle -A QOS -j CONNMARK --save-mark")
-                logger.info("iptables -t mangle -A QOS -j CONNMARK --save-mark")
-                os.system("tc filter add dev %s parent ffff: protocol ip u32 match u32 0 0 action xt -j CONNMARK --restore-mark action mirred egress redirect dev %s flowid ffff:%d" % (iface, ifbIfaces[ifaceNumber], queueNumber+1))
+                os.system("tc class %s dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(sum(limits)))))
+                logger.info("tc class %s dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(sum(limits)))))
+                if initialize:
+                    os.system("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
+                    logger.info("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
+                    os.system("tc filter add dev %s parent 3:0 protocol ip prio 1 u32 match ip %s %s flowid %s" % (ifbIfaces[ifaceNumber], field, hnbNetworks[queueNumber], queue))
+                    logger.info("tc filter add dev %s parent 3:0 protocol ip prio 1 u32 match ip %s %s flowid %s" % (ifbIfaces[ifaceNumber], field, hnbNetworks[queueNumber], queue))
+                    os.system("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
+                    logger.info("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
+            if initialize:
+                os.system("tc filter add dev %s parent ffff: protocol ip u32 match u32 0 0 action xt -j CONNMARK --restore-mark action mirred egress redirect dev %s flowid ffff:1" % (iface, ifbIfaces[ifaceNumber]))
+                logger.info("tc filter add dev %s parent ffff: protocol ip u32 match u32 0 0 action xt -j CONNMARK --restore-mark action mirred egress redirect dev %s flowid ffff:1" % (iface, ifbIfaces[ifaceNumber]))
+        if initialize:
+            os.system("iptables -t mangle -A QOS -j CONNMARK --save-mark")
+            logger.info("iptables -t mangle -A QOS -j CONNMARK --save-mark")
 
 
     def updateEgress(self, confPath):
@@ -368,47 +405,7 @@ class TUCANDaemon():
                 values = line.split()[1:]
                 tests.update(dict(itertools.izip_longest(*[iter([key, values])] * 2, fillvalue="")))
         return tests
-
-
-    def initializeIngress(self):
-        # edge nodes must schedule every other node ingress queues
-        if config.getboolean('rol', 'edge'):
-            rates = []
-            edgePosition = 0
-            nodes = json.loads(config.get('algorithms', 'nodes'))
-            logger.info('%s' % config.get('hnbs', 'ulIfaces'))
-            ulIfaces = json.loads(config.get('hnbs', 'ulIfaces'))
-            dlIfaces = json.loads(config.get('hnbs', 'dlIfaces'))
-            logger.info('this is an edge node')
-            ulRates = json.loads(config.get('algorithms', 'initialUlMin'))
-            dlRates = json.loads(config.get('algorithms', 'initialDlMin'))
-            dlEdgePosition = len(nodes)-1
-            for node in range(0, len(nodes)):
-                # for this node, we directly configure queues
-                if node == 0: # UL
-                    logger.info('Applying initial policing')
-                    for iface in ulIfaces[0]:
-                        os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
-                        os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbit burst 18k drop flowid :1" % (iface, math.floor(ulRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
-                    for iface in dlIfaces[0]:
-                        os.system("tc qdisc del dev %s ingress" % iface) # preventive ingress cleaning
-                        os.system("tc qdisc add dev %s handle ffff: ingress" % iface) # add ingress root
-                        os.system("tc filter replace dev %s parent ffff: protocol ip prio 50 u32 match ip src 0.0.0.0/0 police rate %dkbit burst 18k drop flowid :1" % (iface, math.floor(dlRates[0]))) # introduce a PRIO queuewith policing to maximum capacity
-                    
-                # for the rest of nodes we create a config file and send it to them by SSH protocol
-                elif node == dlEdgePosition:
-                    remoteConfig = ConfigParser.ConfigParser()
-                    remoteConfFile = open('/var/tmp/node-remote-initialization.conf', 'w')
-                    remoteConfig.add_section('policing')
-                    remoteConfig.set('policing', 'ingressIfaces', json.dumps(ulIfaces[1]+dlIfaces[1]))
-                    remoteConfig.set('policing', 'limit', ([ulRates[1]]*len(ulIfaces[1])+([dlRates[1]]*len(dlIfaces[1]))))
-                    remoteConfig.write(remoteConfFile)
-                    remoteConfFile.close()
-                    ssh = self.createSSHClient(nodes[node])
-                    scp = SCPClient(ssh.get_transport())
-                    scp.put('/var/tmp/node-remote-initialization.conf', '/var/tmp/node-UL.conf')
-       
+      
 
     def createSSHClient(self, server):
         logger.info('connecting to %s...' % server)
