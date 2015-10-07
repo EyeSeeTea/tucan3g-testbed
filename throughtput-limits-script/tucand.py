@@ -14,6 +14,7 @@ import os
 import paramiko
 import math
 import operator
+import time
 from scp import SCPClient
 
 
@@ -122,6 +123,16 @@ class TUCANDaemon():
         hnbGateways = json.loads(config.get('hnbs', 'hnbGateways'))
         nodes = json.loads(config.get('algorithms', 'nodes'))
 
+        ulMins = json.loads(config.get('algorithms', 'initialULMin'))
+        ulMinSum = 0
+        for minTraffic in ulMins:
+            ulMinSum += sum(minTraffic)
+        
+        dlMins = json.loads(config.get('algorithms', 'initialDLMin'))
+        dlMinSum = 0
+        for minTraffic in dlMins:
+            dlMinSum += sum(minTraffic)
+
         # Main loop 
         while True:
             # if there's a configuration order from an edge node, we follow it
@@ -144,37 +155,35 @@ class TUCANDaemon():
                     # Only when we consider measurements stable we start changing network parameters
                     if self.registers.isStable('dynamicCapacity', key):
                         logger.info("%s has become stable" % key)
+
                         # Minimum margin calculus
-                        ulMins = json.loads(config.get('algorithms', 'initialULMin'))
-                        ulMinSum = sum(ulMins)
-                        dlMins = json.loads(config.get('algorithms', 'initialDLMin'))
-                        dlMinSum = sum(dlMins)
                         minMargin = capacity - (ulMinSum + dlMinSum)
                         logger.info('Mean Dynamic Capacity: %f' % self.registers.getAverage('dynamicCapacity', key))
+
                         # Effective margin calculus
                         previouslyAdmittedTraffic = 0.0
-                        for hnb in hnbGateways:
+                        for hnbNumber, hnb in enumerate(hnbGateways):
                             for senses in ['UL', 'DL']:
-                                previouslyAdmittedTraffic += self.registers.last('%sLimits' % sense, hnb)
-
+                                previouslyAdmittedTraffic += self.registers.last('%sLimits' % sense, hnbNumber)
                         effectiveMargin = capacity - previouslyAdmittedTraffic 
+
                         # Link margin calculus
                         linkMargin = min([minMargin, effectiveMargin])
 
                         # Traffic flux margins
                         # In a network, the most close to the UL edge
                         for hnbIndex, hnb in enumerate(hnbGateways):
-                            for sense in ['UL', 'DL']:
-                                self.registers.add('flux%smargin' % sense, hnb, ulMins[hnbIndex]/(ulMinSum+dlMinSum))
+                            for sense, mins in zip(['UL', 'DL'], [reduce(operator.add, ulMins), reduce(operator.add, dlMins)]):
+                                self.registers.add('flux%smargin' % sense, hnbIndex, mins[hnbIndex]/(ulMinSum+dlMinSum))
 
-                                logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- %s: %f ' % (minMargin, effectiveMargin, linkMargin, 'flux%smargin' % sense, self.registers.last('flux%smargin' % sense, hnb)))
+                                logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- %s: %f ' % (minMargin, effectiveMargin, linkMargin, 'flux%smargin' % sense, self.registers.last('flux%smargin' % sense, hnbIndex)))
                                 
                                 # Allowed traffics
-                                uldlMin = (ulMins[hnbIndex]) if sense == 'UL' else (dlMins[hnbIndex])
-                                traffic = self.getAdmitted(self.registers.last('%sLimits' % sense, hnb),  uldlMin, self.registers.last('flux%smargin' % sense, hnb), beta, self.registers.getAverage('%sLimits' % sense, hnb))
-                                self.registers.add('%sLimits' % sense, hnb, traffic)
+                                uldlMin = mins[hnbIndex]
+                                traffic = self.getAdmitted(self.registers.last('%sLimits' % sense, hnbIndex),  uldlMin, self.registers.last('flux%smargin' % sense, hnbIndex), beta, self.registers.getAverage('%sLimits' % sense, hnbIndex))
+                                self.registers.add('%sLimits' % sense, hnbIndex, traffic)
        
-                                logger.info('Allowed %s traffic for %s: %f' % (sense, hnb, self.registers.last('%sLimits' % sense, hnb)))
+                                logger.info('Allowed %s traffic for %s: %f' % (sense, hnb, self.registers.last('%sLimits' % sense, hnbIndex)))
     
                         # Create ingress configuration files and send to DL edge
                         self.updateIngressConfFiles()
@@ -194,7 +203,13 @@ class TUCANDaemon():
         if initialize:
             ulRates = json.loads(config.get('algorithms', 'initialULMin'))
         else:
-            ulRates = [self.registers.last('ULLimits', nodes[0]), self.registers.last('ULLimits', nodes[1])]
+            hnbPos = 0
+            for ifaceIndex, ifbIface in enumerate(ulIfbIfaces):
+                limits = []
+                for htbQueueIndex, htbQueue in enumerate(ulHtbQueues[ifaceIndex]):
+                    limits.append(self.registers.last('ULLimits', hnbPos))
+                    hnbPos+=1
+                ulRates.append(limits)
 
         dlIfaces = json.loads(config.get('hnbs', 'dlIfaces'))
         dlIfbIfaces = json.loads(config.get('hnbs', 'dlIfbIfaces'))
@@ -204,8 +219,13 @@ class TUCANDaemon():
         if initialize:
             dlRates = json.loads(config.get('algorithms', 'initialDLMin'))
         else:
-            dlRates = [self.registers.last('DLLimits', nodes[0]), self.registers.last('DLLimits', nodes[1])]
-        
+            hnbPos = 0
+            for ifaceIndex, ifbIface in enumerate(dlIfbIfaces):
+                limits = []
+                for htbQueueIndex, htbQueue in enumerate(dlHtbQueues[ifaceIndex]):
+                    limits.append(self.registers.last('DLLimits', hnbPos))
+                    hnbPos+=1
+                dlRates.append(limits)
             
 
         for sense, edge, ifaces, ifbIfaces, htbQueues, marks, rates in zip(['UL', 'DL-remote'], [0, 1], [ulIfaces, dlIfaces], [ulIfbIfaces, dlIfbIfaces], [ulHtbQueues, dlHtbQueues], [ulMarks, dlMarks], [ulRates, dlRates]):
@@ -227,7 +247,6 @@ class TUCANDaemon():
             remoteConfig.set('policing', 'ifbIfaces', json.dumps(ifacesToWrite))
            
             # htbQueues
-            logger.info('htb queues %s' % htbQueues)
             htbQueuesToWrite = []
             for queues in htbQueues:
                 htbQueuesToWrite += [queues]
@@ -237,9 +256,9 @@ class TUCANDaemon():
             remoteConfig.set('policing', 'htbQueues', json.dumps(htbQueuesToWrite))
 
             # marks
-            marksToWrite = reduce(operator.add, marks)
-            logger.info('marks to write %s' % marksToWrite)
-            remoteConfig.set('policing', 'marks', json.dumps(marksToWrite))
+            #marksToWrite = reduce(operator.add, marks)
+            #logger.info('marks to write %s' % marksToWrite)
+            remoteConfig.set('policing', 'marks', json.dumps(marks))
 
             # networks
             networksToWrite = reduce(operator.add, hnbNetworks)
@@ -289,6 +308,11 @@ class TUCANDaemon():
         field = 'dst'
         if config.get('rol', 'edgeType') == 'DL':
             field = 'src'
+        # this sets the maximum rate allowed for each
+        ceil = []
+        for ifbIfacesIndex, ifbIface in enumerate(ifbIfaces):
+            ceil.append(float(sum(limits[ifbIfacesIndex])))
+            
 
         if initialize:        
             os.system("iptables -t mangle -F") 
@@ -300,9 +324,9 @@ class TUCANDaemon():
             os.system("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
             logger.info("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
         for ifaceNumber, iface in enumerate(ifaces):
-            if math.floor(float(limits[ifaceNumber])) == 0:
-                logger.info('cannot establish rate 0')
-                continue
+            #if math.floor(float(limits[ifaceNumber])) == 0:
+            #    logger.info('cannot establish rate 0')
+            #    continue
             if initialize:
                 os.system("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
                 logger.info("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
@@ -326,25 +350,25 @@ class TUCANDaemon():
                 logger.info("tc qdisc add dev %s root handle 2: htb default 31" % ifbIfaces[ifaceNumber])
 
             # add or change queues traffic limit
-            os.system("tc class %s dev %s parent 3: classid 3:3 htb rate %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
-            logger.info("tc class %s dev %s parent 3: classid 3:3 htb rate %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
+            os.system("tc class %s dev %s parent 3: classid 3:3 htb rate %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(ceil[ifaceNumber])))
+            logger.info("tc class %s dev %s parent 3: classid 3:3 htb rate %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(ceil[ifaceNumber])))
             # HTB 3:31 to receive default traffic
-            os.system("tc class %s dev %s parent 3:3 classid 3:31 htb rate 10kbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
-            logger.info("tc class %s dev %s parent 3:3 classid 3:31 htb rate 10kbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(float(sum(limits)))))
+            os.system("tc class %s dev %s parent 3:3 classid 3:31 htb rate 10kbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(ceil[ifaceNumber])))
+            logger.info("tc class %s dev %s parent 3:3 classid 3:31 htb rate 10kbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], math.floor(ceil[ifaceNumber])))
                 
 
             # per-HNB queues
             for queueNumber, queue in enumerate(htbQueues[ifaceNumber]):
                 logger.info('setting iface %s -- ifbIface %s -- queue %s -- network %s' % (iface, ifbIfaces[ifaceNumber], queue, hnbNetworks[queueNumber]))
-                os.system("tc class %s dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(sum(limits)))))
-                logger.info("tc class %s dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber])), math.floor(float(sum(limits)))))
+                os.system("tc class %s dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber][queueNumber])), math.floor(ceil[ifaceNumber])))
+                logger.info("tc class %s dev %s parent 3:3 classid %s htb rate %dkbit ceil %dkbit" % (action, ifbIfaces[ifaceNumber], queue, math.floor(float(limits[ifaceNumber][queueNumber])), math.floor(ceil[ifaceNumber])))
                 if initialize:
-                    os.system("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
-                    logger.info("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[queueNumber], queue))
+                    os.system("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[ifaceNumber][queueNumber], queue))
+                    logger.info("tc filter add dev %s parent 3:0 protocol ip handle %s fw flowid %s" % (ifbIfaces[ifaceNumber], marks[ifaceNumber][queueNumber], queue))
                     os.system("tc filter add dev %s parent 3:0 protocol ip prio 1 u32 match ip %s %s flowid %s" % (ifbIfaces[ifaceNumber], field, hnbNetworks[queueNumber], queue))
                     logger.info("tc filter add dev %s parent 3:0 protocol ip prio 1 u32 match ip %s %s flowid %s" % (ifbIfaces[ifaceNumber], field, hnbNetworks[queueNumber], queue))
-                    os.system("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
-                    logger.info("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[queueNumber]))
+                    os.system("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[ifaceNumber][queueNumber]))
+                    logger.info("iptables -t mangle -A QOS -s %s -m mark --mark 0 -j MARK --set-mark %s" % (hnbNetworks[queueNumber], marks[ifaceNumber][queueNumber]))
             if initialize:
                 os.system("tc filter add dev %s parent ffff: protocol ip u32 match u32 0 0 action xt -j CONNMARK --restore-mark action mirred egress redirect dev %s flowid ffff:1" % (iface, ifbIfaces[ifaceNumber]))
                 logger.info("tc filter add dev %s parent ffff: protocol ip u32 match u32 0 0 action xt -j CONNMARK --restore-mark action mirred egress redirect dev %s flowid ffff:1" % (iface, ifbIfaces[ifaceNumber]))
