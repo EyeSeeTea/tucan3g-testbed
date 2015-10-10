@@ -11,6 +11,7 @@ import itertools
 from daemon import runner
 import sys
 import os
+import subprocess
 import paramiko
 import math
 import operator
@@ -140,55 +141,160 @@ class TUCANDaemon():
                 if isfile('/var/tmp/node-%s.conf' % sense):
                     self.updateIngress('/var/tmp/node-%s.conf' % sense)
             # algorithms
-            if config.getboolean('rol', 'edge') and config.get('rol', 'edgeType') == 'UL':
-                try:
-                    dynamicCapacity = self.readDynamicCapacity(tests)
-                except:
-                    logger.info("error reading capacity")
-                    continue
-                for netIndex, key in enumerate(tests.keys()):
-                    k = json.loads(config.get('algorithms', 'k'))[netIndex]
-                    beta = config.get('algorithms', 'beta')
-                    capacity = dynamicCapacity[key] * k
-                    self.registers.add('dynamicCapacity', key, capacity)
-                    logger.info("adding %f to %s capacity" % (capacity, key))
-                    # Only when we consider measurements stable we start changing network parameters
-                    if self.registers.isStable('dynamicCapacity', key):
-                        logger.info("%s has become stable" % key)
+            if config.getboolean('rol', 'edge'):
+                for hnbIndex, hnb in enumerate(hnbGateways):
+                    self.parseBytesFromIface(config.get('rol', 'edgeType'), hnbIndex)
+                if config.get('rol', 'edgeType') == 'UL':
+                    try:
+                        dynamicCapacity = self.readDynamicCapacity(tests)
+                    except:
+                        logger.info("error reading capacity")
+                        continue
+                    for netIndex, key in enumerate(tests.keys()):
+                        k = json.loads(config.get('algorithms', 'k'))[netIndex]
+                        beta = config.get('algorithms', 'beta')
+                        capacity = dynamicCapacity[key] * k
+                        self.registers.add('dynamicCapacity', key, capacity)
+                        logger.info("adding %f to %s capacity" % (capacity, key))
+                        # Only when we consider measurements stable we start changing network parameters
+                        if self.registers.isStable('dynamicCapacity', key):
+                            logger.info("%s has become stable" % key)
 
-                        # Minimum margin calculus
-                        minMargin = capacity - (ulMinSum + dlMinSum)
-                        logger.info('Mean Dynamic Capacity: %f' % self.registers.getAverage('dynamicCapacity', key))
+                            # Minimum margin calculus
+                            minMargin = capacity - (ulMinSum + dlMinSum)
+                            logger.info('Mean Dynamic Capacity: %f' % self.registers.getAverage('dynamicCapacity', key))
 
-                        # Effective margin calculus
-                        previouslyAdmittedTraffic = 0.0
-                        for hnbNumber, hnb in enumerate(hnbGateways):
-                            for senses in ['UL', 'DL']:
-                                previouslyAdmittedTraffic += self.registers.last('%sLimits' % sense, hnbNumber)
-                        effectiveMargin = capacity - previouslyAdmittedTraffic 
+                            # Effective margin calculus
+                            previouslyAdmittedTraffic = 0.0
+                            for hnbNumber, hnb in enumerate(hnbGateways):
+                                for senses in ['UL', 'DL']:
+                                    previouslyAdmittedTraffic += self.registers.last('%sLimits' % sense, hnbNumber)
+                            effectiveMargin = capacity - previouslyAdmittedTraffic 
 
-                        # Link margin calculus
-                        linkMargin = min([minMargin, effectiveMargin])
+                            # Link margin calculus
+                            linkMargin = min([minMargin, effectiveMargin])
 
-                        # Traffic flux margins
-                        # In a network, the most close to the UL edge
-                        for hnbIndex, hnb in enumerate(hnbGateways):
-                            for sense, mins in zip(['UL', 'DL'], [reduce(operator.add, ulMins), reduce(operator.add, dlMins)]):
-                                self.registers.add('flux%smargin' % sense, hnbIndex, mins[hnbIndex]/(ulMinSum+dlMinSum))
+                            # Traffic flux margins
+                            # In a network, the most close to the UL edge
+                            for hnbIndex, hnb in enumerate(hnbGateways):
+                                for sense, mins in zip(['UL', 'DL'], [reduce(operator.add, ulMins), reduce(operator.add, dlMins)]):
+                                    logger.info('mins: %s -- mins[hnbIndex]: %s -- ulMinSum+dlMinSum: %s' % (mins, mins[hnbIndex], ulMinSum+dlMinSum))
+                                    self.registers.add('flux%smargin' % sense, hnbIndex, mins[hnbIndex]/(ulMinSum+dlMinSum))
 
-                                logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- %s: %f ' % (minMargin, effectiveMargin, linkMargin, 'flux%smargin' % sense, self.registers.last('flux%smargin' % sense, hnbIndex)))
-                                
-                                # Allowed traffics
-                                uldlMin = mins[hnbIndex]
-                                traffic = self.getAdmitted(self.registers.last('%sLimits' % sense, hnbIndex),  uldlMin, self.registers.last('flux%smargin' % sense, hnbIndex), beta, self.registers.getAverage('%sLimits' % sense, hnbIndex))
-                                self.registers.add('%sLimits' % sense, hnbIndex, traffic)
+                                    logger.info('Minimums margin: %f -- Effective margin: %f -- Link margin: %f -- %s: %f ' % (minMargin, effectiveMargin, linkMargin, 'flux%smargin' % sense, self.registers.last('flux%smargin' % sense, hnbIndex)))
+                                    
+                                    # Get traffic hitting interface before ingress
+                                    uldlMin = mins[hnbIndex]
+                                    tic = self.registers.last('%sTimestamp' % sense, hnbIndex)
+                                    ticBytes = self.registers.last('%sBytes' % sense, hnbIndex)
+                                    toc, tocBytes = self.getTimeBytesFromFile('/var/tmp/bytes-time-%s-%d.conf' % (sense, hnbIndex), sense, hnbIndex)
+                                    logger.info('TIME: TIC %f TOC %f -- BYTES: TIC %d TOC %d' % (tic, toc, ticBytes, tocBytes))
+                                    delta = toc-tic
+                                    deltaBytes = tocBytes - ticBytes
+                                    logger.info('adding %d bytes and %f seconds' % (toc, tocBytes))
+                                    self.registers.add('%sTimestamp' % sense, hnbIndex, toc)
+                                    self.registers.add('%sBytes' % sense, hnbIndex, tocBytes)
+                                    if delta == 0.0:
+                                        throughput = 0
+                                    else:
+                                        throughput = ((deltaBytes*8)/1000)/delta # (in kbps)
+                                    logger.info('throughput hitting external interface: %s' % throughput)
+
+                                    # Allowed traffics
+                                    traffic = self.getAdmitted(self.registers.last('%sLimits' % sense, hnbIndex),  uldlMin, self.registers.last('flux%smargin' % sense, hnbIndex), beta, throughput)
+                                    self.registers.add('%sLimits' % sense, hnbIndex, traffic)
        
-                                logger.info('Allowed %s traffic for %s: %f' % (sense, hnb, self.registers.last('%sLimits' % sense, hnbIndex)))
+                                    logger.info('Allowed %s traffic for %s: %f' % (sense, hnb, self.registers.last('%sLimits' % sense, hnbIndex)))
     
-                        # Create ingress configuration files and send to DL edge
-                        self.updateIngressConfFiles()
+                            # Create ingress configuration files and send to DL edge
+                            self.updateIngressConfFiles()
  
             time.sleep(10)
+
+    
+    def parseBytesFromIface(self, sense, hnbIndex):
+        logger.info('getting time and bytes for sense: %s -- hnb: %s' % (sense, hnbIndex))
+        bytesTimeConfig = ConfigParser.ConfigParser()
+        bytesTimeConfFile = open('/var/tmp/bytes-time-%s-%d.conf' % (sense, hnbIndex), 'w')
+        bytesTimeConfig.add_section('snapshot')
+        ifbIfaces = []
+        htbQueues = []
+        edge = config.get('rol', 'edgeType')
+        if  edge == 'UL':
+            htbQueues = json.loads(config.get('hnbs', 'ulHtbQueues'))
+            ifbIfaces = json.loads(config.get('hnbs', 'ulIfbIfaces'))
+        else:
+            htbQueues = json.loads(config.get('hnbs', 'dlHtbQueues'))
+            ifbIfaces = json.loads(config.get('hnbs', 'dlIfbIfaces'))
+        logger.info('htbQueues: %s -- ifbIfaces: %s' % (htbQueues, ifbIfaces))
+
+        timeStamps = []
+        ifaceBytes = []
+        Pos = 0
+        for hnbIter, hnb in enumerate(ifbIfaces):
+            timeStampsIface = []
+            ifaceBytesIface = []
+            for ifaceIndex, iface in enumerate(hnb):
+                output = subprocess.check_output('tc -s -d class show dev %s' % iface, shell=True)
+                timeStamp = time.time()
+                logger.info('Timestamp from iface %s: %f seconds' % (iface, timeStamp))
+                queue = ''
+                for row in output.split('\n'):
+                    if queue != '':
+                        ifaceByte = row.split(' ')[2]
+                        logger.info('timeStamp: %s -- ifaceBytes: %s' % (timeStamp, ifaceByte))
+                        timeStampsIface.append(timeStamp)
+                        ifaceBytesIface.append(ifaceByte)
+                        queue = ''
+                    if 'class' in row:
+                        queue = row.split(' ')[2]
+                        if (hnb[ifaceIndex], queue) not in self.getCombinations(ifbIfaces, htbQueues):
+                            queue = ''
+                timeStamps += [timeStampsIface]
+                ifaceBytes += [ifaceBytesIface]
+        logger.info('ifbIfaces: %s' % ifbIfaces)
+        logger.info('htbQueues: %s' % htbQueues)
+        logger.info('timeStamps: %s' % timeStamps)
+        logger.info('ifaceBytes: %s' % ifaceBytes)
+        
+        bytesTimeConfig.set('snapshot', 'ifbIfaces', json.dumps(ifbIfaces))
+        bytesTimeConfig.set('snapshot', 'htbQueues', json.dumps(htbQueues))
+        bytesTimeConfig.set('snapshot', 'timeStamps', json.dumps(timeStamps))
+        bytesTimeConfig.set('snapshot', 'ifaceBytes', json.dumps(ifaceBytes))
+        bytesTimeConfig.write(bytesTimeConfFile)
+        bytesTimeConfFile.close()
+
+        if edge == 'DL':
+            nodes = json.loads(config.get('algorithms', 'nodes'))
+            ssh = self.createSSHClient(nodes[0])
+            scp = SCPClient(ssh.get_transport())
+            scp.put('/var/tmp/bytes-time-%s-%d.conf' % (sense, hnbIndex), '/var/tmp/bytes-time-%s-%d.conf' % (sense, hnbIndex))
+
+
+    def getCombinations(self, list1, list2):
+        combinations=[]
+        for index, elem in enumerate(list1):
+            combinations+=list(itertools.product(*[elem, list2[index]]))
+        return combinations
+
+
+    def getTimeBytesFromFile(self, filePath, sense, hnbIndex):
+        if not isfile(filePath):
+            return 0,0
+        updateConfig = ConfigParser.ConfigParser() 
+        updateConfig.read(filePath)
+        ifbIfaces = json.loads(updateConfig.get('snapshot', 'ifbIfaces'))
+        htbQueues = json.loads(updateConfig.get('snapshot', 'htbQueues'))
+        timeStamps = json.loads(updateConfig.get('snapshot', 'timeStamps'))
+        ifaceBytes = json.loads(updateConfig.get('snapshot', 'ifaceBytes'))
+        logger.info('getTimeBytes ifbIfaces: %s' % ifbIfaces)
+        logger.info('getTimeBytes htbQueues: %s' % htbQueues)
+        logger.info('getTimeBytes timeStamps: %s' % timeStamps)
+        logger.info('getTimeBytes ifaceBytes: %s' % ifaceBytes)
+
+        return float(reduce(operator.add, timeStamps)[hnbIndex]), int(reduce(operator.add, ifaceBytes)[hnbIndex])
+
+
 
     def updateIngressConfFiles(self, initialize=False):
         # Some needed vars
@@ -250,14 +356,10 @@ class TUCANDaemon():
             htbQueuesToWrite = []
             for queues in htbQueues:
                 htbQueuesToWrite += [queues]
-            #for ifbIfaceNumber, ifbIface in enumerate(ifbIfaces):
-            #    htbQueuesToWrite +=  htbQueues[ifbIfaceNumber]
             logger.info('htb queues to write %s' % htbQueuesToWrite)
             remoteConfig.set('policing', 'htbQueues', json.dumps(htbQueuesToWrite))
 
             # marks
-            #marksToWrite = reduce(operator.add, marks)
-            #logger.info('marks to write %s' % marksToWrite)
             remoteConfig.set('policing', 'marks', json.dumps(marks))
 
             # networks
@@ -282,11 +384,15 @@ class TUCANDaemon():
         minTraffic = float(minTraffic)
         margin = float(margin)
         beta = float(beta)
+        allowedTraffic = 0
         if not config.getboolean('algorithms', 'altFormula'):
             logger.info('prev: %f -- min: %f -- margin: %f -- beta: %f' % (previousAdmitted, minTraffic, margin, beta))
-            return max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0])
+            allowedTraffic = max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0])
         else:
-            return min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), averageTraffic])
+            allowedTraffic = min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), averageTraffic])
+        if allowedTraffic < 10: # To avoid blocking the interface, we don't allow less than 10kbps
+            allowedTraffic = 10
+        return allowedTraffic
 
 
     def updateIngress(self, confPath, initialize=False):
@@ -324,9 +430,6 @@ class TUCANDaemon():
             os.system("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
             logger.info("iptables -t mangle -A QOS -j CONNMARK --restore-mark")
         for ifaceNumber, iface in enumerate(ifaces):
-            #if math.floor(float(limits[ifaceNumber])) == 0:
-            #    logger.info('cannot establish rate 0')
-            #    continue
             if initialize:
                 os.system("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
                 logger.info("iptables -t mangle -A FORWARD -o %s -j QOS" % iface)
