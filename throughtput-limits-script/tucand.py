@@ -114,6 +114,7 @@ class TUCANDaemon():
         # Set initial conditions (the UL edge is in charge of this)
         if config.getboolean('rol', 'edge') and config.get('rol', 'edgeType') == 'UL':
             self.updateIngressConfFiles(initialize=True)
+        if config.getboolean('rol', 'edge'):
             for sense in ['UL', 'DL']:
                 if isfile('/var/tmp/node-%s.conf' % sense):
                     self.updateIngress('/var/tmp/node-%s.conf' % sense, initialize=True)
@@ -194,6 +195,7 @@ class TUCANDaemon():
                                     logger.info('adding %d bytes and %f seconds' % (toc, tocBytes))
                                     self.registers.add('%sTimestamp' % sense, hnbIndex, toc)
                                     self.registers.add('%sBytes' % sense, hnbIndex, tocBytes)
+                                    # prevent division by zero
                                     if delta == 0.0:
                                         throughput = 0
                                     else:
@@ -379,7 +381,7 @@ class TUCANDaemon():
         scp.put('/var/tmp/node-DL-remote.conf', '/var/tmp/node-UL.conf')
        
 
-    def getAdmitted(self, previousAdmitted, minTraffic, margin, beta, averageTraffic):
+    def getAdmitted(self, previousAdmitted, minTraffic, margin, beta, interfaceTraffic):
         previousAdmitted = float(previousAdmitted)
         minTraffic = float(minTraffic)
         margin = float(margin)
@@ -389,7 +391,7 @@ class TUCANDaemon():
             logger.info('prev: %f -- min: %f -- margin: %f -- beta: %f' % (previousAdmitted, minTraffic, margin, beta))
             allowedTraffic = max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0])
         else:
-            allowedTraffic = min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), averageTraffic])
+            allowedTraffic = min([max([previousAdmitted, minTraffic]) + margin - max([beta * (previousAdmitted - minTraffic),0]), max([interfaceTraffic, minTraffic])])
         if allowedTraffic < 10: # To avoid blocking the interface, we don't allow less than 10kbps
             allowedTraffic = 10
         return allowedTraffic
